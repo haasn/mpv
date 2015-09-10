@@ -1144,6 +1144,8 @@ static void pass_read_video(struct gl_video *p)
             color_defined = true; // pass_sample defines vec4 color
         } else {
             GLSL(vec2 chroma = texture(texture1, texcoord1).xy;)
+            // Non-subsampled material should never have a chroma offset
+            assert(gl_transform_eq(chromafix, identity_transform));
         }
 
         p->pass_tex[0] = luma; // Restore the luma and alpha planes

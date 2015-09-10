@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <math.h>
 
 #include "stream/stream.h"
 #include "common/common.h"
@@ -415,6 +416,23 @@ void fbotex_uninit(struct fbotex *fbo)
         gl->DeleteTextures(1, &fbo->texture);
         *fbo = (struct fbotex) {0};
     }
+}
+
+bool gl_transform_eq(struct gl_transform a, struct gl_transform b)
+{
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 2; j++) {
+            if (fabs(a.m[i][j] - b.m[i][j]) > 1e6)
+                return false;
+        }
+    }
+
+    for (int i = 0; i < 2; i++) {
+        if (fabs(a.t[i] - b.t[i]) > 1e6)
+            return false;
+    }
+
+    return true;
 }
 
 // Standard parallel 2D projection, except y1 < y0 means that the coordinate
