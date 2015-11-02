@@ -76,7 +76,8 @@ struct fbotex {
     GLuint texture;
     GLenum iformat;
     GLenum tex_filter;
-    int w, h;   // size of .texture
+    int rw, rh; // real (texture) size
+    int lw, lh; // logical (configured) size
 };
 
 bool fbotex_init(struct fbotex *fbo, GL *gl, struct mp_log *log, int w, int h,
@@ -93,6 +94,11 @@ void fbotex_set_filter(struct fbotex *fbo, GLenum gl_filter);
 struct gl_transform {
     float m[2][2];
     float t[2];
+};
+
+static const struct gl_transform identity_t = {
+    .m = {{1.0, 0.0}, {0.0, 1.0}},
+    .t = {0.0, 0.0},
 };
 
 void gl_transform_ortho(struct gl_transform *t, float x0, float x1,
