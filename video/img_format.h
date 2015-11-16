@@ -86,6 +86,7 @@ struct mp_imgfmt_desc {
     int8_t bpp[MP_MAX_PLANES];   // bits per pixel
     int8_t plane_bits;           // number of bits in use for plane 0
     int8_t component_bits;       // number of bits per component (0 if uneven)
+    int8_t components[MP_MAX_PLANES]; // number of components for each plane
     // chroma shifts per plane (provided for convenience with planar formats)
     int8_t xs[MP_MAX_PLANES];
     int8_t ys[MP_MAX_PLANES];

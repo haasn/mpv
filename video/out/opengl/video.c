@@ -111,13 +111,16 @@ struct texplane {
 #define PLANE_CHROMA 3
 #define PLANE_ALPHA 4
 #define PLANE_XYZ 5
+#define PLANE_OTHER 6
 
 struct img_tex {
+    int type; // see PLANE_*, must be set to something non-zero
+    int components; // number of relevant coordinates
     GLuint gl_tex;
     GLenum gl_target;
+    int tex_w, tex_h;
     int w, h;
-    struct gl_transform offset;
-    int type; // see PLANE_*
+    struct gl_transform transform;
 };
 
 struct video_image {
@@ -133,6 +136,7 @@ struct fbosurface {
 
 #define FBOSURFACES_MAX 10
 
+/*
 struct src_tex {
     GLuint gl_tex;
     GLenum gl_target;
@@ -140,6 +144,7 @@ struct src_tex {
     int w, h; // logical width/height
     struct gl_transform transform;
 };
+*/
 
 struct cached_file {
     char *path;
@@ -186,13 +191,13 @@ struct gl_video {
 
     struct video_image image;
 
-    struct fbotex chroma_merge_fbo;
-    struct fbotex chroma_deband_fbo;
+    struct fbotex merge_fbo[4];
+    struct fbotex deband_fbo[4];
+    struct fbotex scale_fbo[4];
     struct fbotex indirect_fbo;
     struct fbotex blend_subs_fbo;
     struct fbotex unsharp_fbo;
     struct fbotex output_fbo;
-    struct fbotex deband_fbo;
     struct fbosurface surfaces[FBOSURFACES_MAX];
 
     // these are duplicated so we can keep rendering back and forth between
@@ -219,7 +224,7 @@ struct gl_video {
     int vp_w, vp_h;
 
     // temporary during rendering
-    struct src_tex pass_tex[TEXUNIT_VIDEO_NUM];
+    struct img_tex pass_tex[TEXUNIT_VIDEO_NUM];
     int pass_tex_num;
     //struct src_tex current_tex;
     int texture_w, texture_h;
@@ -624,12 +629,15 @@ static void uninit_rendering(struct gl_video *p)
 
     gl->DeleteBuffers(1, &p->nnedi3_weights_buffer);
 
-    fbotex_uninit(&p->chroma_merge_fbo);
-    fbotex_uninit(&p->chroma_deband_fbo);
+    for (int n = 0; n < 4; n++) {
+        fbotex_uninit(&p->merge_fbo[n]);
+        fbotex_uninit(&p->deband_fbo[n]);
+        fbotex_uninit(&p->scale_fbo[n]);
+    }
+
     fbotex_uninit(&p->indirect_fbo);
     fbotex_uninit(&p->blend_subs_fbo);
     fbotex_uninit(&p->unsharp_fbo);
-    fbotex_uninit(&p->deband_fbo);
 
     for (int n = 0; n < 2; n++) {
         fbotex_uninit(&p->pre_fbo[n]);
@@ -684,9 +692,12 @@ void gl_video_set_lut3d(struct gl_video *p, struct lut3d *lut3d)
     reinit_rendering(p);
 }
 
-static struct src_tex src_tex_fbo(struct fbotex *fbo, struct gl_transform t)
+static struct img_tex img_tex_fbo(struct fbotex *fbo, struct gl_transform t,
+                                  int type, int components)
 {
-    return (struct src_tex){
+    assert(type != PLANE_NONE);
+    return (struct img_tex){
+        .type = type,
         .gl_tex = fbo->texture,
         .gl_target = GL_TEXTURE_2D,
         .tex_w = fbo->rw,
@@ -694,9 +705,11 @@ static struct src_tex src_tex_fbo(struct fbotex *fbo, struct gl_transform t)
         .w = fbo->lw,
         .h = fbo->lh,
         .transform = t,
+        .components = components,
     };
 }
 
+/*
 static struct src_tex src_tex_img(struct img_tex *img, struct gl_transform t)
 {
     return (struct src_tex){
@@ -709,9 +722,10 @@ static struct src_tex src_tex_img(struct img_tex *img, struct gl_transform t)
         .transform = t,
     };
 }
+*/
 
 // returns ID of texture or -1 if out of texture units
-static int pass_bind(struct gl_video *p, struct src_tex tex)
+static int pass_bind(struct gl_video *p, struct img_tex tex)
 {
     if (p->pass_tex_num == TEXUNIT_VIDEO_NUM)
         return -1;
@@ -769,12 +783,15 @@ static void pass_get_img_tex(struct gl_video *p, struct video_image *vimg,
         }
 
         tex[n] = (struct img_tex){
+            .type = type,
             .gl_tex = t->gl_texture,
             .gl_target = t->gl_target,
+            .tex_w = t->w,
+            .tex_h = t->h,
             .w = t->w,
             .h = t->h,
-            .offset = type == PLANE_CHROMA ? chroma : identity_t,
-            .type = type,
+            .transform = type == PLANE_CHROMA ? chroma : identity_t,
+            .components = p->image_desc.components[n],
         };
     }
 }
@@ -877,7 +894,7 @@ static void pass_prepare_src_tex(struct gl_video *p)
     struct gl_shader_cache *sc = p->sc;
 
     for (int n = 0; n < p->pass_tex_num; n++) {
-        struct src_tex *s = &p->pass_tex[n];
+        struct img_tex *s = &p->pass_tex[n];
         if (!s->gl_tex)
             continue;
 
@@ -919,7 +936,7 @@ static void render_pass_quad(struct gl_video *p, int vp_w, int vp_h,
         v->position.x = x[n / 2];
         v->position.y = y[n % 2];
         for (int i = 0; i < p->pass_tex_num; i++) {
-            struct src_tex *s = &p->pass_tex[i];
+            struct img_tex *s = &p->pass_tex[i];
             if (!s->gl_tex)
                 continue;
             struct mp_rect_f src_rect = {0, 0, s->w, s->h};
@@ -968,18 +985,15 @@ static void finish_pass_direct(struct gl_video *p, GLint fbo, int vp_w, int vp_h
 //          FBO, if the required parameters have changed
 // w, h: required FBO target dimension, and also defines the target rectangle
 //       used for rasterization
-// tex: a src_tex to load the result back into (optional)
 // flags: 0 or combination of FBOTEX_FUZZY_W/FBOTEX_FUZZY_H (setting the fuzzy
 //        flags allows the FBO to be larger than the w/h parameters)
 static void finish_pass_fbo(struct gl_video *p, struct fbotex *dst_fbo,
-                            int w, int h, struct src_tex *tex, int flags)
+                            int w, int h, int flags)
 {
     fbotex_change(dst_fbo, p->gl, p->log, w, h, p->opts.fbo_format, flags);
 
     finish_pass_direct(p, dst_fbo->fbo, dst_fbo->rw, dst_fbo->rh,
                        &(struct mp_rect){0, 0, w, h}, 0);
-    if (tex)
-        *tex = src_tex_fbo(dst_fbo, identity_t);
 }
 
 static void uninit_scaler(struct gl_video *p, struct scaler *scaler)
@@ -1014,8 +1028,8 @@ static bool apply_shaders(struct gl_video *p, char **shaders, int w, int h,
         const char *body = load_cached_file(p, shaders[n]);
         if (!body)
             continue;
-        finish_pass_fbo(p, &textures[tex], w, h, NULL, 0);
-        int id = pass_bind(p, src_tex_fbo(&textures[tex], identity_t));
+        finish_pass_fbo(p, &textures[tex], w, h, 0);
+        int id = pass_bind(p, img_tex_fbo(&textures[tex], identity_t, PLANE_OTHER, 4));
         load_shader(p, body);
         GLSLF("// custom shader\n");
         GLSLF("vec4 color = sample(texture%d, texcoord%d, texture_size%d);\n",
@@ -1157,7 +1171,7 @@ static void reinit_scaler(struct gl_video *p, struct scaler *scaler,
 }
 
 // Special helper for sampling from two separated stages
-static void pass_sample_separated(struct gl_video *p, struct src_tex src,
+static void pass_sample_separated(struct gl_video *p, struct img_tex src,
                                   struct scaler *scaler, int w, int h)
 {
     // Separate the transformation into x and y components, per pass
@@ -1175,22 +1189,22 @@ static void pass_sample_separated(struct gl_video *p, struct src_tex src,
     sampler_prelude(p->sc, pass_bind(p, src));
     GLSLF("// pass 1\n");
     pass_sample_separated_gen(p->sc, scaler, 0, 1);
-    finish_pass_fbo(p, &scaler->sep_fbo, src.w, h, &src, FBOTEX_FUZZY_H);
+    finish_pass_fbo(p, &scaler->sep_fbo, src.w, h, FBOTEX_FUZZY_H);
 
     // Second pass (scale only in the x dir)
-    src.transform = t_x;
+    src = img_tex_fbo(&scaler->sep_fbo, t_x, src.type, src.components);
     sampler_prelude(p->sc, pass_bind(p, src));
     GLSLF("// pass 2\n");
     pass_sample_separated_gen(p->sc, scaler, 1, 0);
 }
 
-// Sample from src_tex, with the src rectangle given by it.
+// Sample from img_tex, with the src rectangle given by it.
 // The dst rectangle is implicit by what the caller will do next, but w and h
 // must still be what is going to be used (to dimension FBOs correctly).
 // This will declare "vec4 color;", which contains the scaled contents.
 // The scaler unit is initialized by this function; in order to avoid cache
 // thrashing, the scaler unit should usually use the same parameters.
-static void pass_sample(struct gl_video *p, struct src_tex tex,
+static void pass_sample(struct gl_video *p, struct img_tex tex,
                         struct scaler *scaler, const struct scaler_config *conf,
                         double scale_factor, int w, int h)
 {
@@ -1311,7 +1325,7 @@ static void pass_prescale(struct gl_video *p, int src_tex_num, int dst_tex_num,
 static bool pass_prescale_luma(struct gl_video *p, float tex_mul,
                                struct gl_transform *chromafix,
                                struct gl_transform *transform,
-                               struct src_tex *prescaled_tex,
+                               struct img_tex *prescaled_tex,
                                int *prescaled_planes)
 {
     return false;
@@ -1381,17 +1395,153 @@ static bool pass_prescale_luma(struct gl_video *p, float tex_mul,
     */
 }
 
+// Copy a texture to the vec4 color, while increasing offset
+static void copy_img_tex(struct gl_video *p, int *offset, struct img_tex img)
+{
+    int count = img.components;
+    assert(*offset + count <= 4);
+
+    int id = pass_bind(p, img);
+    const char *src = "wzyx" + (4 - count);
+    const char *dst = (const char*[4]){"wzyx", "wzy", "wz", "w"}[*offset]
+                      + (4 - *offset - count);
+    GLSLF("color.%s = texture(texture%d, texcoord%d).%s;\n", dst, id, id, src);
+
+    *offset += count;
+}
+
 // sample from video textures, set "color" variable to yuv value
 static void pass_read_video(struct gl_video *p)
 {
-    /*
-    struct gl_transform chromafix;
-    pass_set_image_textures(p, &p->image, &chromafix);
+    struct img_tex tex[4];
+    pass_get_img_tex(p, &p->image, tex);
 
+    // TODO: tex_mul stuff
     int in_bits = p->image_desc.component_bits,
         tx_bits = (in_bits + 7) & ~7;
     float tex_mul = ((1 << tx_bits) - 1.0) / ((1 << in_bits) - 1.0);
 
+    // TODO: figure out if prescaling requested
+    int dst_w = p->texture_w, dst_h = p->texture_h;
+
+    bool debanded[4] = {false, false, false, false};
+
+    while (true) {
+        // Find next plane to operate on
+        int n = -1;
+        for (int i = 0; i < 4; i++) {
+            if ((tex[i].w < dst_w || tex[i].h < dst_h || !debanded[i])
+                && tex[i].type != PLANE_NONE)
+            {
+                n = i;
+                break;
+            }
+        }
+
+        if (n == -1)
+            break;
+
+        // Figure out if it needs to be merged with anything else first
+        int o = -1;
+        for (int i = n+1; i < 4; i++) {
+            if (tex[i].type == tex[n].type
+                && tex[i].w == tex[n].w
+                && tex[i].h == tex[n].h
+                && gl_transform_eq(tex[i].transform, tex[n].transform))
+            {
+                o = i;
+                break;
+            }
+        }
+
+        // Multiple planes share the same dimensions and type, merge them
+        if (o != -1) {
+            // This step doesn't transform the image yet
+            struct gl_transform transform = tex[n].transform;
+            tex[n].transform = identity_t;
+            tex[o].transform = identity_t;
+
+            int num = 0;
+            GLSL(vec4 color = vec4(0.0);)
+            copy_img_tex(p, &num, tex[n]);
+            copy_img_tex(p, &num, tex[o]);
+            finish_pass_fbo(p, &p->merge_fbo[n], tex[n].w, tex[n].h, 0);
+
+            // Set up the merged plane
+            tex[n] = img_tex_fbo(&p->merge_fbo[n], transform, tex[n].type, num);
+
+            memset(&tex[o], 0, sizeof(tex[o]));
+            continue;
+        }
+
+        // Plane is not yet debanded
+        if (!debanded[n]) {
+            if (!p->opts.deband || tex[n].type == PLANE_ALPHA) {
+                debanded[n] = true;
+                continue;
+            }
+
+            // This step doesn't transform the image yet
+            struct gl_transform transform = tex[n].transform;
+            tex[n].transform = identity_t;
+
+            int id = pass_bind(p, tex[n]);
+            pass_sample_deband(p->sc, p->opts.deband_opts, id, p->gl_target,
+                               1.0, tex[n].w, tex[n].h, &p->lfg);
+
+            // Optimization: Skip (clear) unused planes
+            for (int i = tex[n].components; i < 4; i++)
+                GLSLF("color.%c = %f;", "xyzw"[i], i == 3 ? 1.0 : 0.0);
+
+            finish_pass_fbo(p, &p->deband_fbo[n], tex[n].w, tex[n].h, 0);
+            tex[n] = img_tex_fbo(&p->deband_fbo[n], transform,
+                                 tex[n].type, tex[n].components);
+
+            debanded[n] = true;
+            continue;
+        }
+
+        // TODO: if prescaling requested, figure out if and how to prescale
+
+        // Otherwise, explicitly upscale + align to the desired resolution
+        const struct scaler_config *conf;
+        struct scaler *scaler;
+        switch (tex[n].type) {
+            case PLANE_LUMA:
+            case PLANE_RGB:
+            case PLANE_XYZ:
+                conf = &p->opts.scaler[0];
+                scaler = &p->scaler[0];
+                break;
+
+            // FIXME: use bilinear for alpha
+            case PLANE_CHROMA:
+            case PLANE_ALPHA:
+            case PLANE_OTHER:
+                conf = &p->opts.scaler[2];
+                scaler = &p->scaler[2];
+                break;
+
+            default:
+                abort();
+        }
+
+        pass_sample(p, tex[n], scaler, conf, 1.0, dst_w, dst_h);
+        finish_pass_fbo(p, &p->scale_fbo[n], dst_w, dst_h, FBOTEX_FUZZY);
+        tex[n] = img_tex_fbo(&p->scale_fbo[n], identity_t,
+                             tex[n].type, tex[n].components);
+    }
+
+    // All planes are of the same size and propery aligned at this point
+    GLSL(vec4 color = vec4(0.0, 0.0, 0.0, 1.0);)
+
+    int coord = 0;
+    for (int i = 0; i < 4; i++) {
+        if (tex[i].type != PLANE_NONE)
+            copy_img_tex(p, &coord, tex[i]);
+    }
+
+    /*
     struct src_tex prescaled_tex;
     struct gl_transform offset = {{{0}}};
     int prescaled_planes;
@@ -1700,8 +1850,8 @@ static void pass_scale_main(struct gl_video *p)
     compute_src_transform(p, &transform, &vp_w, &vp_h);
 
     GLSLF("// main scaling\n");
-    finish_pass_fbo(p, &p->indirect_fbo, p->texture_w, p->texture_h, NULL, 0);
-    pass_sample(p, src_tex_fbo(&p->indirect_fbo, transform),
+    finish_pass_fbo(p, &p->indirect_fbo, p->texture_w, p->texture_h, 0);
+    pass_sample(p, img_tex_fbo(&p->indirect_fbo, transform, PLANE_OTHER, 4),
                 scaler, &scaler_conf, scale_factor, vp_w, vp_h);
 
     // Changes the texture size to display size after main scaler.
@@ -1921,23 +2071,13 @@ static void pass_render_frame_dumb(struct gl_video *p, int fbo)
     tchroma.t[0] /= 1 << p->image_desc.chroma_xs;
     tchroma.t[1] /= 1 << p->image_desc.chroma_ys;
 
+    int index = 0;
+    GLSL(vec4 color = vec4(0.0, 0.0, 0.0, 1.0);)
     for (int i = 0; i < p->plane_count; i++) {
         gl_transform_trans(tex[i].type == PLANE_CHROMA ? tchroma : transform,
-                           &tex[i].offset);
-        pass_bind(p, src_tex_img(&tex[i], tex[i].offset));
+                           &tex[i].transform);
+        copy_img_tex(p, &index, tex[i]);
     }
-
-    GLSL(vec4 color = texture(texture0, texcoord0);)
-    if (p->image_params.imgfmt == IMGFMT_NV12 ||
-        p->image_params.imgfmt == IMGFMT_NV21)
-    {
-        GLSL(color.gb = texture(texture1, texcoord1).RG;)
-    } else if (p->plane_count >= 3) {
-        GLSL(color.g = texture(texture1, texcoord1).r;)
-        GLSL(color.b = texture(texture2, texcoord2).r;)
-    }
-    if (p->plane_count >= 4)
-        GLSL(color.a = texture(texture3, texcoord3).r;);
 
     p->use_normalized_range = false;
     pass_convert_yuv(p);
@@ -1972,7 +2112,7 @@ static void pass_render_frame(struct gl_video *p)
             .display_par = scale[1] / scale[0], // counter compensate scaling
         };
         finish_pass_fbo(p, &p->blend_subs_fbo,
-                        p->texture_w, p->texture_h, 0, 0);
+                        p->texture_w, p->texture_h, 0);
         pass_draw_osd(p, OSD_DRAW_SUB_ONLY, vpts, rect,
                       p->texture_w, p->texture_h, p->blend_subs_fbo.fbo, false);
         GLSL(vec4 color = texture(texture0, texcoord0);)
@@ -1984,7 +2124,7 @@ static void pass_render_frame(struct gl_video *p)
     */
 
     if (p->opts.unsharp != 0.0) {
-        finish_pass_fbo(p, &p->unsharp_fbo, p->texture_w, p->texture_h, 0, 0);
+        finish_pass_fbo(p, &p->unsharp_fbo, p->texture_w, p->texture_h, 0);
         pass_sample_unsharp(p->sc, p->opts.unsharp);
     }
 
@@ -2008,7 +2148,7 @@ static void pass_render_frame(struct gl_video *p)
         // We should always blend subtitles in non-linear light
         if (p->use_linear)
             pass_delinearize(p->sc, p->image_params.gamma);
-        finish_pass_fbo(p, &p->blend_subs_fbo, p->texture_w, p->texture_h, 0,
+        finish_pass_fbo(p, &p->blend_subs_fbo, p->texture_w, p->texture_h,
                         FBOTEX_FUZZY);
         pass_draw_osd(p, OSD_DRAW_SUB_ONLY, vpts, rect,
                       p->texture_w, p->texture_h, p->blend_subs_fbo.fbo, false);
@@ -2061,7 +2201,7 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
         gl_video_upload_image(p, t->current);
         pass_render_frame(p);
         finish_pass_fbo(p, &p->surfaces[p->surface_now].fbotex,
-                        vp_w, vp_h, 0, FBOTEX_FUZZY);
+                        vp_w, vp_h, FBOTEX_FUZZY);
         p->surfaces[p->surface_now].pts = p->image.mpi->pts;
         p->surface_idx = p->surface_now;
     }
@@ -2122,7 +2262,7 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
             gl_video_upload_image(p, f);
             pass_render_frame(p);
             finish_pass_fbo(p, &p->surfaces[surface_dst].fbotex,
-                            vp_w, vp_h, 0, FBOTEX_FUZZY);
+                            vp_w, vp_h, FBOTEX_FUZZY);
             p->surfaces[surface_dst].pts = f->pts;
             p->surface_idx = surface_dst;
             surface_dst = fbosurface_wrap(surface_dst+1);
@@ -2265,13 +2405,13 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
             goto done;
         }
 
-        finish_pass_fbo(p, &p->output_fbo, vp_w, vp_h, NULL, FBOTEX_FUZZY);
+        finish_pass_fbo(p, &p->output_fbo, vp_w, vp_h, FBOTEX_FUZZY);
         p->output_fbo_valid = true;
     }
 
     // "output fbo valid" and "output fbo needed" are equivalent
     if (p->output_fbo_valid) {
-        pass_bind(p, src_tex_fbo(&p->output_fbo, identity_t));
+        pass_bind(p, img_tex_fbo(&p->output_fbo, identity_t, PLANE_OTHER, 4));
         GLSL(vec4 color = texture(texture0, texcoord0);)
         pass_draw_to_screen(p, fbo);
     }

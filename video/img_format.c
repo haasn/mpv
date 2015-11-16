@@ -166,6 +166,7 @@ struct mp_imgfmt_desc mp_imgfmt_get_desc(int mpfmt)
             desc.component_bits = depth;
         if (depth != desc.component_bits)
             desc.component_bits = 0;
+        desc.components[d.plane] += 1;
     }
 
     for (int p = 0; p < 4; p++) {

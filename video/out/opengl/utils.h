@@ -123,6 +123,18 @@ static inline void gl_transform_rect(struct gl_transform t, struct mp_rect_f *r)
     gl_transform_vec(t, &r->x1, &r->y1);
 }
 
+static inline bool gl_transform_eq(struct gl_transform a, struct gl_transform b)
+{
+    for (int x = 0; x < 2; x++) {
+        for (int y = 0; y < 2; y++) {
+            if (a.m[x][y] != b.m[x][y])
+                return false;
+        }
+    }
+
+    return a.t[0] == b.t[0] && a.t[1] == b.t[1];
+}
+
 void gl_transform_trans(struct gl_transform t, struct gl_transform *x);
 
 void gl_set_debug_logger(GL *gl, struct mp_log *log);
