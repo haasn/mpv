@@ -1466,8 +1466,6 @@ static void pass_read_video(struct gl_video *p)
             copy_img_tex(p, &num, tex[n]);
             copy_img_tex(p, &num, tex[o]);
             finish_pass_fbo(p, &p->merge_fbo[n], tex[n].w, tex[n].h, 0);
-
-            // Set up the merged plane
             tex[n] = img_tex_fbo(&p->merge_fbo[n], transform, tex[n].type, num);
 
             memset(&tex[o], 0, sizeof(tex[o]));
@@ -1491,7 +1489,7 @@ static void pass_read_video(struct gl_video *p)
 
             // Optimization: Skip (clear) unused planes
             for (int i = tex[n].components; i < 4; i++)
-                GLSLF("color.%c = %f;", "xyzw"[i], i == 3 ? 1.0 : 0.0);
+                GLSLF("color.%c = %f;\n", "xyzw"[i], i == 3 ? 1.0 : 0.0);
 
             finish_pass_fbo(p, &p->deband_fbo[n], tex[n].w, tex[n].h, 0);
             tex[n] = img_tex_fbo(&p->deband_fbo[n], transform,
