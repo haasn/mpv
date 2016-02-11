@@ -1800,10 +1800,9 @@ static void pass_colormanage(struct gl_video *p, enum mp_csp_prim prim_src,
     }
     if (p->use_lut_3d) {
         gl_sc_uniform_sampler(p->sc, "lut_3d", GL_TEXTURE_3D, TEXUNIT_3DLUT);
-        // For the 3DLUT we are arbitrarily using 2.4 as input gamma to reduce
+        // For the 3DLUT we are arbitrarily using sRGB as input gamma to reduce
         // the severity of quantization errors.
-        GLSL(color.rgb = clamp(color.rgb, 0.0, 1.0);)
-        GLSL(color.rgb = pow(color.rgb, vec3(1.0/2.4));)
+        pass_delinearize(p->sc, MP_CSP_TRC_SRGB);
         GLSL(color.rgb = texture3D(lut_3d, color.rgb).rgb;)
     }
     if (need_gamma)

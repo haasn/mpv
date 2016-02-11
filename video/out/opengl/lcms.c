@@ -197,7 +197,7 @@ bool gl_lcms_get_lut3d(struct gl_lcms *p, struct lut3d **result_lut3d)
         // because we may change the parameter in the future or make it
         // customizable, same for the primaries.
         char *cache_info = talloc_asprintf(tmp,
-                "ver=1.1, intent=%d, size=%dx%dx%d, gamma=2.4, prim=bt2020\n",
+                "ver=1.1, intent=%d, size=%dx%dx%d, gamma=sRGB, prim=bt2020\n",
                 p->opts.intent, s_r, s_g, s_b);
 
         uint8_t hash[32];
@@ -253,9 +253,10 @@ bool gl_lcms_get_lut3d(struct gl_lcms *p, struct lut3d **result_lut3d)
         .Blue  = {csp.blue.x,  csp.blue.y,  1.0},
     };
 
-    // 2.4 is arbitrarily used as a gamma compression factor for the 3DLUT,
+    // sRGB is arbitrarily used as a gamma compression factor for the 3DLUT,
     // reducing artifacts due to rounding errors on wide gamut profiles
-    cmsToneCurve *tonecurve = cmsBuildGamma(cms, 2.4);
+    cmsToneCurve *tonecurve = cmsBuildParametricToneCurve(cms, 4,
+            (cmsFloat64Number[5]){2.4, 1/1.055, 0.055/1.055, 1/12.92, 0.04045});
     cmsHPROFILE vid_profile = cmsCreateRGBProfileTHR(cms, &wp, &prim,
                         (cmsToneCurve*[3]){tonecurve, tonecurve, tonecurve});
     cmsFreeToneCurve(tonecurve);
