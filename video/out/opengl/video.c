@@ -1768,9 +1768,9 @@ static void pass_colormanage(struct gl_video *p, enum mp_csp_prim prim_src,
     enum mp_csp_prim prim_dst = p->opts.target_prim;
 
     if (p->use_lut_3d) {
-        // The 3DLUT is hard-coded against BT.2020's gamut during creation, and
+        // The 3DLUT is hard-coded against BT.709's gamut during creation, and
         // we never want to adjust its output (so treat it as linear)
-        prim_dst = MP_CSP_PRIM_BT_2020;
+        prim_dst = MP_CSP_PRIM_BT_709;
         trc_dst = MP_CSP_TRC_LINEAR;
     }
 
@@ -1800,10 +1800,10 @@ static void pass_colormanage(struct gl_video *p, enum mp_csp_prim prim_src,
     }
     if (p->use_lut_3d) {
         gl_sc_uniform_sampler(p->sc, "lut_3d", GL_TEXTURE_3D, TEXUNIT_3DLUT);
-        // For the 3DLUT we are arbitrarily using 2.4 as input gamma to reduce
+        // For the 3DLUT we are arbitrarily using 1.961 as input gamma to reduce
         // the severity of quantization errors.
         GLSL(color.rgb = clamp(color.rgb, 0.0, 1.0);)
-        GLSL(color.rgb = pow(color.rgb, vec3(1.0/2.4));)
+        GLSL(color.rgb = pow(color.rgb, vec3(1.0/1.961));)
         GLSL(color.rgb = texture3D(lut_3d, color.rgb).rgb;)
     }
     if (need_gamma)
