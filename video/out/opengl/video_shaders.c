@@ -325,6 +325,25 @@ void pass_delinearize(struct gl_shader_cache *sc, enum mp_csp_trc trc, int contr
     }
 }
 
+// Convert from XYZ to Lab (using a reference white point)
+void pass_convert_xyz2lab(struct gl_shader_cache *sc, struct mp_csp_col_xy wp)
+{
+    GLSLF("#define Lab_f(t) mix(%f*t + vec3(%f), pow(t,vec3(%f)),"
+                                "lessThan(vec3(%f), t));\n",
+            1./3 * pow(29./6, 2), 4./29, 1./3, pow(6./29, 3));
+
+    // Divide by white point and pass through the Lab nonlinear function
+    GLSLF("color.xyz = Lab_f(color.xyz / vec3(%f, %f, %f));\n",
+            wp.x/wp.y, 1.0, (1-wp.x-wp.y)/wp.y);
+
+    GLSL(color.xyz = vec3(116 * color.y - 16,
+                          500 * (color.x - color.y),
+                          200 * (color.y - color.z));)
+
+    // Shift into range (as per the ICC v4 Lab 16-bit encoding)
+    GLSL(color.xyz = vec3(color.x / 100, (color.yz + vec2(128)) / 255);)
+}
+
 // Wide usage friendly PRNG, shamelessly stolen from a GLSL tricks forum post.
 // Obtain random numbers by calling rand(h), followed by h = permute(h) to
 // update the state.

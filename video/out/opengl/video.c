@@ -1775,12 +1775,17 @@ static void pass_colormanage(struct gl_video *p, enum mp_csp_prim prim_src,
     if (p->use_lut_3d) {
         // The 3DLUT is hard-coded against BT.2020's gamut during creation, and
         // we never want to adjust its output (so treat it as linear)
-        prim_dst = MP_CSP_PRIM_BT_2020;
+        prim_dst = MP_CSP_PRIM_XYZ_D65;
         trc_dst = MP_CSP_TRC_LINEAR;
     }
 
-    if (prim_dst == MP_CSP_PRIM_AUTO)
+    if (prim_dst == MP_CSP_PRIM_AUTO) {
         prim_dst = prim_src;
+        // Avoid outputting non-RGB data at all costs
+        if (prim_dst == MP_CSP_PRIM_XYZ_D65)
+            prim_dst = MP_CSP_PRIM_BT_709;
+    }
+
     if (trc_dst == MP_CSP_TRC_AUTO) {
         trc_dst = trc_src;
         // Avoid outputting linear light at all costs
@@ -1804,12 +1809,11 @@ static void pass_colormanage(struct gl_video *p, enum mp_csp_prim prim_src,
         GLSL(color.rgb = cms_matrix * color.rgb;)
     }
     if (p->use_lut_3d) {
+        // We pick Lab D65 as the input for the 3DLUT, so convert first
+        struct mp_csp_col_xy wp = mp_get_csp_primaries(MP_CSP_PRIM_XYZ_D65).white;
+        pass_convert_xyz2lab(p->sc, wp);
         gl_sc_uniform_sampler(p->sc, "lut_3d", GL_TEXTURE_3D, TEXUNIT_3DLUT);
-        // For the 3DLUT we are arbitrarily using 2.4 as input gamma to reduce
-        // the severity of quantization errors.
-        GLSL(color.rgb = clamp(color.rgb, 0.0, 1.0);)
-        GLSL(color.rgb = pow(color.rgb, vec3(1.0/2.4));)
-        GLSL(color.rgb = texture3D(lut_3d, color.rgb).rgb;)
+        GLSL(color.rgb = texture3D(lut_3d, color.xyz).rgb;)
     }
     if (need_gamma)
         pass_delinearize(p->sc, trc_dst, 0);

@@ -64,6 +64,7 @@ const struct m_opt_choice_alternatives mp_csp_prim_names[] = {
     {"adobe",       MP_CSP_PRIM_ADOBE},
     {"prophoto",    MP_CSP_PRIM_PRO_PHOTO},
     {"cie1931",     MP_CSP_PRIM_CIE_1931},
+    {"xyz-d65",     MP_CSP_PRIM_XYZ_D65},
     {0}
 };
 
@@ -403,6 +404,14 @@ struct mp_csp_primaries mp_get_csp_primaries(enum mp_csp_prim spc)
             .blue  = {0.1666, 0.0089},
             .white = e
         };
+    case MP_CSP_PRIM_XYZ_D65:
+        // "Dummy" values for the primaries signal an identity transformation
+        return (struct mp_csp_primaries) {
+            .red   = {0},
+            .green = {0},
+            .blue  = {0},
+            .white = d65
+        };
     default:
         return (struct mp_csp_primaries) {{0}};
     }
@@ -413,6 +422,18 @@ struct mp_csp_primaries mp_get_csp_primaries(enum mp_csp_prim spc)
 static void mp_get_rgb2xyz_matrix(struct mp_csp_primaries space, float m[3][3])
 {
     float S[3], X[4], Z[4];
+
+    if (space.red.x   == 0 && space.red.y   == 0 &&
+        space.green.x == 0 && space.green.y == 0 &&
+        space.blue.x  == 0 && space.blue.y  == 0)
+    {
+        // Values of all 0 for the primaries signal an identity matrix
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++)
+                m[i][j] = i==j ? 1.0 : 0.0;
+        }
+        return;
+    }
 
     // Convert from CIE xyY to XYZ. Note that Y=1 holds true for all primaries
     X[0] = space.red.x   / space.red.y;

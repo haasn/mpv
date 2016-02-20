@@ -56,7 +56,7 @@ static bool parse_3dlut_size(const char *arg, int *p1, int *p2, int *p3)
         return false;
     for (int n = 0; n < 3; n++) {
         int s = ((int[]) { *p1, *p2, *p3 })[n];
-        if (s < 2 || s > 512 || ((s - 1) & s))
+        if (s < 2 || s > 2048 || ((s - 1) & s))
             return false;
     }
     return true;
@@ -85,7 +85,7 @@ const struct m_sub_options mp_icc_conf = {
     },
     .size = sizeof(struct mp_icc_opts),
     .defaults = &(const struct mp_icc_opts) {
-        .size_str = "128x256x64",
+        .size_str = "512x64x64",
         .intent = INTENT_RELATIVE_COLORIMETRIC,
     },
 };
@@ -177,28 +177,28 @@ bool gl_lcms_has_changed(struct gl_lcms *p)
 
 bool gl_lcms_get_lut3d(struct gl_lcms *p, struct lut3d **result_lut3d)
 {
-    int s_r, s_g, s_b;
+    int s_L, s_a, s_b;
     bool result = false;
 
-    if (!parse_3dlut_size(p->opts.size_str, &s_r, &s_g, &s_b))
+    if (!parse_3dlut_size(p->opts.size_str, &s_L, &s_a, &s_b))
         return false;
 
     if (!p->icc_data && !p->icc_path)
         return false;
 
     void *tmp = talloc_new(NULL);
-    uint16_t *output = talloc_array(tmp, uint16_t, s_r * s_g * s_b * 3);
+    uint16_t *output = talloc_array(tmp, uint16_t, s_L * s_a * s_b * 3);
     struct lut3d *lut = NULL;
     cmsContext cms = NULL;
 
     char *cache_file = NULL;
     if (p->opts.cache_dir && p->opts.cache_dir[0]) {
-        // Gamma is included in the header to help uniquely identify it,
-        // because we may change the parameter in the future or make it
-        // customizable, same for the primaries.
+        // Source information is included in the header to help uniquely
+        // identify it,  because we may change the parameter in the future
+        // or make it customizable.
         char *cache_info = talloc_asprintf(tmp,
-                "ver=1.1, intent=%d, size=%dx%dx%d, gamma=2.4, prim=bt2020\n",
-                p->opts.intent, s_r, s_g, s_b);
+                "ver=1.1, intent=%d, size=%dx%dx%d, src=Lab, wp=D65\n",
+                p->opts.intent, s_L, s_a, s_b);
 
         uint8_t hash[32];
         struct AVSHA *sha = av_sha_alloc();
@@ -242,24 +242,18 @@ bool gl_lcms_get_lut3d(struct gl_lcms *p, struct lut3d **result_lut3d)
     if (!profile)
         goto error_exit;
 
-    // We always generate the 3DLUT against BT.2020, and transform into this
-    // space inside the shader if the source differs.
-    struct mp_csp_primaries csp = mp_get_csp_primaries(MP_CSP_PRIM_BT_2020);
+    // We always generate the 3DLUT against Lab D65, and transform into this
+    // space inside the shader.
+    struct mp_csp_col_xy wp = mp_get_csp_primaries(MP_CSP_PRIM_XYZ_D65).white;
 
-    cmsCIExyY wp = {csp.white.x, csp.white.y, 1.0};
-    cmsCIExyYTRIPLE prim = {
-        .Red   = {csp.red.x,   csp.red.y,   1.0},
-        .Green = {csp.green.x, csp.green.y, 1.0},
-        .Blue  = {csp.blue.x,  csp.blue.y,  1.0},
-    };
+    cmsCIExyY cms_wp = {wp.x, wp.y, 1.0};
+    cmsHPROFILE vid_profile = cmsCreateLab4ProfileTHR(cms, &cms_wp);
+    if (!vid_profile) {
+        cmsCloseProfile(profile);
+        goto error_exit;
+    }
 
-    // 2.4 is arbitrarily used as a gamma compression factor for the 3DLUT,
-    // reducing artifacts due to rounding errors on wide gamut profiles
-    cmsToneCurve *tonecurve = cmsBuildGamma(cms, 2.4);
-    cmsHPROFILE vid_profile = cmsCreateRGBProfileTHR(cms, &wp, &prim,
-                        (cmsToneCurve*[3]){tonecurve, tonecurve, tonecurve});
-    cmsFreeToneCurve(tonecurve);
-    cmsHTRANSFORM trafo = cmsCreateTransformTHR(cms, vid_profile, TYPE_RGB_16,
+    cmsHTRANSFORM trafo = cmsCreateTransformTHR(cms, vid_profile, TYPE_Lab_16,
                                                 profile, TYPE_RGB_16,
                                                 p->opts.intent,
                                                 cmsFLAGS_HIGHRESPRECALC);
@@ -269,17 +263,17 @@ bool gl_lcms_get_lut3d(struct gl_lcms *p, struct lut3d **result_lut3d)
     if (!trafo)
         goto error_exit;
 
-    // transform a (s_r)x(s_g)x(s_b) cube, with 3 components per channel
-    uint16_t *input = talloc_array(tmp, uint16_t, s_r * 3);
+    // transform a (s_L)x(s_a)x(s_b) cube, with 3 components per channel
+    uint16_t *input = talloc_array(tmp, uint16_t, s_L * 3);
     for (int b = 0; b < s_b; b++) {
-        for (int g = 0; g < s_g; g++) {
-            for (int r = 0; r < s_r; r++) {
-                input[r * 3 + 0] = r * 65535 / (s_r - 1);
-                input[r * 3 + 1] = g * 65535 / (s_g - 1);
-                input[r * 3 + 2] = b * 65535 / (s_b - 1);
+        for (int a = 0; a < s_a; a++) {
+            for (int L = 0; L < s_L; L++) {
+                input[L * 3 + 0] = L * 65535 / (s_L - 1);
+                input[L * 3 + 1] = a * 65535 / (s_a - 1);
+                input[L * 3 + 2] = b * 65535 / (s_b - 1);
             }
-            size_t base = (b * s_r * s_g + g * s_r) * 3;
-            cmsDoTransform(trafo, input, output + base, s_r);
+            size_t base = (b * s_L * s_a + a * s_L) * 3;
+            cmsDoTransform(trafo, input, output + base, s_L);
         }
     }
 
@@ -298,7 +292,7 @@ done: ;
     lut = talloc_ptrtype(NULL, lut);
     *lut = (struct lut3d) {
         .data = talloc_steal(lut, output),
-        .size = {s_r, s_g, s_b},
+        .size = {s_L, s_a, s_b},
     };
 
     *result_lut3d = lut;
