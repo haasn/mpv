@@ -955,8 +955,7 @@ Available video output drivers are:
 
     ``3dlut-size=<L>x<a>x<b>``
         Size of the 3D LUT generated from the ICC profile in each dimension
-        (CIE L*a*b*). Default is 512x64x64.
-        Sizes must be a power of two, and 2048 at most.
+        (CIE L*a*b*). Default is 256x100x100. Sizes may range from 2 to 2048.
 
     ``blend-subtitles=<yes|video|no>``
         Blend subtitles directly onto upscaled video frames, before

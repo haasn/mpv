@@ -56,7 +56,7 @@ static bool parse_3dlut_size(const char *arg, int *p1, int *p2, int *p3)
         return false;
     for (int n = 0; n < 3; n++) {
         int s = ((int[]) { *p1, *p2, *p3 })[n];
-        if (s < 2 || s > 2048 || ((s - 1) & s))
+        if (s < 2 || s > 2048)
             return false;
     }
     return true;
@@ -85,7 +85,7 @@ const struct m_sub_options mp_icc_conf = {
     },
     .size = sizeof(struct mp_icc_opts),
     .defaults = &(const struct mp_icc_opts) {
-        .size_str = "512x64x64",
+        .size_str = "256x100x100",
         .intent = INTENT_RELATIVE_COLORIMETRIC,
     },
 };
