@@ -665,9 +665,8 @@ Available video output drivers are:
         post-shaders (list)
             These get applied after upscaling and subtitle blending (when
             ``blend-subtitles`` is enabled), but before color management.
-            Operates on linear RGB if ``linear-scaling`` is in effect,
-            otherwise non-linear RGB. This is the best place for colorspace
-            transformations (eg. saturation mapping).
+            Operates on non-linear RGB (same as input). This is the best place
+            for colorspace transformations (eg. saturation mapping).
 
         These files must define a function with the following signature::
 
@@ -913,6 +912,12 @@ Available video output drivers are:
             Pure power curve (gamma 2.8), also used for BT.470-BG
         prophoto
             ProPhoto RGB (ROMM)
+
+    ``target-contrast=<0..100000>``
+        Specifies the target device profile's static contrast ratio. This is
+        used for BT.1886 inputs (e.g. typical video files) to avoid black crush.
+
+        A value of 0 (default) assumes an "infinite" contrast ratio.
 
     ``icc-profile=<file>``
         Load an ICC profile and use it to transform linear RGB to screen output.

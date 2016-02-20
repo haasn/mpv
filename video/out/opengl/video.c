@@ -206,7 +206,6 @@ struct gl_video {
     struct src_tex pass_tex[TEXUNIT_VIDEO_NUM];
     int texture_w, texture_h;
     struct gl_transform texture_offset; // texture transform without rotation
-    bool use_linear;
     bool use_normalized_range;
     float user_gamma;
 
@@ -417,6 +416,7 @@ const struct m_sub_options gl_video_conf = {
         OPT_FLAG("gamma-auto", gamma_auto, 0),
         OPT_CHOICE_C("target-prim", target_prim, 0, mp_csp_prim_names),
         OPT_CHOICE_C("target-trc", target_trc, 0, mp_csp_trc_names),
+        OPT_INTRANGE("target-contrast", target_contrast, 0, 0, 100000),
         OPT_FLAG("pbo", pbo, 0),
         SCALER_OPTS("scale",  0),
         SCALER_OPTS("dscale", 1),
@@ -1719,10 +1719,12 @@ static void pass_scale_main(struct gl_video *p)
 
     // Pre-conversion, like linear light/sigmoidization
     GLSLF("// scaler pre-conversion\n");
-    if (p->use_linear)
-        pass_linearize(p->sc, p->image_params.gamma);
+    bool use_linear  = p->opts.linear_scaling || p->opts.sigmoid_upscaling,
+         use_sigmoid = use_linear && p->opts.sigmoid_upscaling && upscaling;
 
-    bool use_sigmoid = p->use_linear && p->opts.sigmoid_upscaling && upscaling;
+    if (use_linear)
+        pass_linearize(p->sc, p->image_params.gamma, 0);
+
     float sig_center, sig_slope, sig_offset, sig_scale;
     if (use_sigmoid) {
         // Coefficients for the sigmoidal transform are taken from the
@@ -1756,6 +1758,9 @@ static void pass_scale_main(struct gl_video *p)
         GLSLF("color.rgb = (1.0/(1.0 + exp(%f * (%f - color.rgb))) - %f) / %f;\n",
                 sig_slope, sig_center, sig_offset, sig_scale);
     }
+
+    if (use_linear)
+        pass_delinearize(p->sc, p->image_params.gamma, 0);
 }
 
 // Adapts the colors from the given color space to the display device's native
@@ -1788,7 +1793,7 @@ static void pass_colormanage(struct gl_video *p, enum mp_csp_prim prim_src,
     bool need_cms = prim_src != prim_dst || p->use_lut_3d;
     bool need_gamma = trc_src != trc_dst || need_cms;
     if (need_gamma)
-        pass_linearize(p->sc, trc_src);
+        pass_linearize(p->sc, trc_src, p->opts.target_contrast);
     // Adapt to the right colorspace if necessary
     if (prim_src != prim_dst) {
         struct mp_csp_primaries csp_src = mp_get_csp_primaries(prim_src),
@@ -1807,7 +1812,7 @@ static void pass_colormanage(struct gl_video *p, enum mp_csp_prim prim_src,
         GLSL(color.rgb = texture3D(lut_3d, color.rgb).rgb;)
     }
     if (need_gamma)
-        pass_delinearize(p->sc, trc_dst);
+        pass_delinearize(p->sc, trc_dst, 0);
 }
 
 static void pass_dither(struct gl_video *p)
@@ -2003,7 +2008,6 @@ static void pass_render_frame(struct gl_video *p)
     if (p->dumb_mode)
         return;
 
-    p->use_linear = p->opts.linear_scaling || p->opts.sigmoid_upscaling;
     pass_read_video(p);
     pass_convert_yuv(p);
 
@@ -2051,16 +2055,11 @@ static void pass_render_frame(struct gl_video *p)
         get_scale_factors(p, scale);
         rect.ml *= scale[0]; rect.mr *= scale[0];
         rect.mt *= scale[1]; rect.mb *= scale[1];
-        // We should always blend subtitles in non-linear light
-        if (p->use_linear)
-            pass_delinearize(p->sc, p->image_params.gamma);
         finish_pass_fbo(p, &p->blend_subs_fbo, p->texture_w, p->texture_h, 0,
                         FBOTEX_FUZZY);
         pass_draw_osd(p, OSD_DRAW_SUB_ONLY, vpts, rect,
                       p->texture_w, p->texture_h, p->blend_subs_fbo.fbo, false);
         GLSL(vec4 color = texture(texture0, texcoord0);)
-        if (p->use_linear)
-            pass_linearize(p->sc, p->image_params.gamma);
     }
 
     apply_shaders(p, p->opts.post_shaders, &p->post_fbo[0], 0,
@@ -2078,8 +2077,7 @@ static void pass_draw_to_screen(struct gl_video *p, int fbo)
         GLSL(color.rgb = clamp(color.rgb, 0.0, 1.0);)
         GLSL(color.rgb = pow(color.rgb, vec3(user_gamma));)
     }
-    pass_colormanage(p, p->image_params.primaries,
-                     p->use_linear ? MP_CSP_TRC_LINEAR : p->image_params.gamma);
+    pass_colormanage(p, p->image_params.primaries, p->image_params.gamma);
     pass_dither(p);
     int flags = (p->image_params.rotate % 90 ? 0 : p->image_params.rotate / 90)
               | (p->image.image_flipped ? 4 : 0);

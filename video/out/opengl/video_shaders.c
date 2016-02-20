@@ -239,10 +239,12 @@ void pass_sample_oversample(struct gl_shader_cache *sc, struct scaler *scaler,
 }
 
 // Linearize (expand), given a TRC as input
-void pass_linearize(struct gl_shader_cache *sc, enum mp_csp_trc trc)
+void pass_linearize(struct gl_shader_cache *sc, enum mp_csp_trc trc, int contrast)
 {
     if (trc == MP_CSP_TRC_LINEAR)
         return;
+
+    double gain, lift;
 
     GLSL(color.rgb = clamp(color.rgb, 0.0, 1.0);)
     switch (trc) {
@@ -252,7 +254,15 @@ void pass_linearize(struct gl_shader_cache *sc, enum mp_csp_trc trc)
                              lessThan(vec3(0.04045), color.rgb));)
         break;
     case MP_CSP_TRC_BT_1886:
-        GLSL(color.rgb = pow(color.rgb, vec3(1.961));)
+        if (contrast == 0) { // "infinite" contrast
+            gain = 1.0;
+            lift = 0.0;
+        } else {
+            double black_inv = pow(1.0 / contrast, 1.0/2.4);
+            gain = pow(1.0 - black_inv, 2.4);
+            lift = black_inv / (1.0 - black_inv);
+        }
+        GLSLF("color.rgb = %f * pow(color.rgb + vec3(%f), vec3(2.4));\n", gain, lift);
         break;
     case MP_CSP_TRC_GAMMA18:
         GLSL(color.rgb = pow(color.rgb, vec3(1.8));)
@@ -272,10 +282,12 @@ void pass_linearize(struct gl_shader_cache *sc, enum mp_csp_trc trc)
 }
 
 // Delinearize (compress), given a TRC as output
-void pass_delinearize(struct gl_shader_cache *sc, enum mp_csp_trc trc)
+void pass_delinearize(struct gl_shader_cache *sc, enum mp_csp_trc trc, int contrast)
 {
     if (trc == MP_CSP_TRC_LINEAR)
         return;
+
+    double gain, lift;
 
     GLSL(color.rgb = clamp(color.rgb, 0.0, 1.0);)
     switch (trc) {
@@ -286,7 +298,15 @@ void pass_delinearize(struct gl_shader_cache *sc, enum mp_csp_trc trc)
                              lessThanEqual(vec3(0.0031308), color.rgb));)
         break;
     case MP_CSP_TRC_BT_1886:
-        GLSL(color.rgb = pow(color.rgb, vec3(1.0/1.961));)
+        if (contrast == 0) { // "infinite" contrast
+            gain = 1.0;
+            lift = 0.0;
+        } else {
+            double black_inv = pow(1.0 / contrast, 1.0/2.4);
+            gain = pow(1.0 - black_inv, 2.4);
+            lift = black_inv / (1.0 - black_inv);
+        }
+        GLSLF("color.rgb = pow(color.rgb / %f, vec3(1/2.4)) - vec3(%f);\n", gain, lift);
         break;
     case MP_CSP_TRC_GAMMA18:
         GLSL(color.rgb = pow(color.rgb, vec3(1.0/1.8));)
