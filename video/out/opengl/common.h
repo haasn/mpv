@@ -61,6 +61,7 @@ enum {
     MPGL_CAP_3D_TEX             = (1 << 15),
     MPGL_CAP_DEBUG              = (1 << 16),
     MPGL_CAP_DXINTEROP          = (1 << 17),    // WGL_NV_DX_interop
+    MPGL_CAP_COMPUTE            = (1 << 18),
     MPGL_CAP_SW                 = (1 << 30),    // indirect or sw renderer
 };
 
@@ -167,6 +168,9 @@ struct GL {
                                             GLint);
     void (GLAPIENTRY *BlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint,
                                        GLint, GLint, GLbitfield, GLenum);
+    void (GLAPIENTRY *DispatchCompute)(GLuint, GLuint, GLuint);
+    void (GLAPIENTRY *BindImageTexture)(GLuint, GLuint, GLint, GLboolean,
+                                        GLint, GLenum, GLenum);
 
     void (GLAPIENTRY *Uniform1f)(GLint, GLfloat);
     void (GLAPIENTRY *Uniform2f)(GLint, GLfloat, GLfloat);

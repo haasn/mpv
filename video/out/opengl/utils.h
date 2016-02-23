@@ -82,6 +82,7 @@ bool fbotex_change(struct fbotex *fbo, GL *gl, struct mp_log *log, int w, int h,
 #define FBOTEX_FUZZY_W 1
 #define FBOTEX_FUZZY_H 2
 #define FBOTEX_FUZZY (FBOTEX_FUZZY_W | FBOTEX_FUZZY_H)
+#define FBOTEX_COMPUTE 4
 void fbotex_set_filter(struct fbotex *fbo, GLenum gl_filter);
 
 // A 3x2 matrix, with the translation part separate.
@@ -127,6 +128,7 @@ void gl_sc_haddf(struct gl_shader_cache *sc, const char *textf, ...);
 void gl_sc_uniform_sampler(struct gl_shader_cache *sc, char *name, GLenum target,
                            int unit);
 void gl_sc_uniform_sampler_ui(struct gl_shader_cache *sc, char *name, int unit);
+void gl_sc_uniform_writeonly_image2D(struct gl_shader_cache *sc, char *name, int unit);
 void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, GLfloat f);
 void gl_sc_uniform_i(struct gl_shader_cache *sc, char *name, GLint f);
 void gl_sc_uniform_vec2(struct gl_shader_cache *sc, char *name, GLfloat f[2]);
@@ -139,7 +141,8 @@ void gl_sc_uniform_buffer(struct gl_shader_cache *sc, char *name,
                           const char *text, int binding);
 void gl_sc_set_vao(struct gl_shader_cache *sc, struct gl_vao *vao);
 void gl_sc_enable_extension(struct gl_shader_cache *sc, char *name);
-void gl_sc_gen_shader_and_reset(struct gl_shader_cache *sc);
+void gl_sc_gen_shader_and_reset(struct gl_shader_cache *sc, struct mp_log *log,
+                                GLenum type);
 void gl_sc_reset(struct gl_shader_cache *sc);
 
 #endif

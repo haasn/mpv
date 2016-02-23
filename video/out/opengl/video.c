@@ -946,7 +946,7 @@ static void finish_pass_direct(struct gl_video *p, GLint fbo, int vp_w, int vp_h
     GL *gl = p->gl;
     pass_prepare_src_tex(p);
     gl->BindFramebuffer(GL_FRAMEBUFFER, fbo);
-    gl_sc_gen_shader_and_reset(p->sc);
+    gl_sc_gen_shader_and_reset(p->sc, p->log, GL_FRAGMENT_SHADER);
     render_pass_quad(p, vp_w, vp_h, dst, flags);
     gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
     memset(&p->pass_tex, 0, sizeof(p->pass_tex));
@@ -966,6 +966,43 @@ static void finish_pass_fbo(struct gl_video *p, struct fbotex *dst_fbo,
 
     finish_pass_direct(p, dst_fbo->fbo, dst_fbo->w, dst_fbo->h,
                        &(struct mp_rect){0, 0, w, h}, 0);
+    pass_load_fbotex(p, dst_fbo, w, h, tex);
+}
+
+// block_{w,h}: the width/height of a compute shader's local size, which is
+// tiled as necessary to cover the whole image.
+// (see finish_pass_fbo for a description of the other parameters)
+// Note: Compute shaders are always expected to write directly to the image2D
+// named "image".
+static void finish_pass_compute(struct gl_video *p, struct fbotex *dst_fbo,
+                                int w, int h, int tex, int flags,
+                                int block_w, int block_h)
+{
+    GL *gl = p->gl;
+
+    // As the "target" of a compute shader, we re-use our FBO helpers to
+    // generate/update an appropriately sized texture. FBOTEX_COMPUTE signals
+    // that we're going to directly draw to it instead of using an actual FBO.
+    flags |= FBOTEX_COMPUTE;
+    fbotex_change(dst_fbo, p->gl, p->log, w, h, p->opts.fbo_format, flags);
+    gl_sc_uniform_writeonly_image2D(p->sc, "image", IMGUNIT_COMPUTE_OUT);
+    gl->BindImageTexture(IMGUNIT_COMPUTE_OUT, dst_fbo->texture,
+                         0, GL_FALSE, 0, GL_WRITE_ONLY, dst_fbo->iformat);
+
+    pass_prepare_src_tex(p);
+    gl_sc_haddf(p->sc, "layout (local_size_x = %d, local_size_y = %d) in;\n",
+                block_w, block_h);
+    gl_sc_gen_shader_and_reset(p->sc, p->log, GL_COMPUTE_SHADER);
+
+    // always round up when dividing to make sure we don't leave off a part of
+    // the image
+    int num_x = w / block_w + (w % block_w != 0),
+        num_y = h / block_h + (h % block_h != 0);
+
+    gl->DispatchCompute(num_x, num_y, 1);
+    debug_check_gl(p, "after dispatching compute shader");
+
+    memset(&p->pass_tex, 0, sizeof(p->pass_tex));
     pass_load_fbotex(p, dst_fbo, w, h, tex);
 }
 
@@ -1919,7 +1956,7 @@ static void pass_draw_osd(struct gl_video *p, int draw_flags, double pts,
         if (cms)
             pass_colormanage(p, MP_CSP_PRIM_BT_709, MP_CSP_TRC_SRGB);
         gl_sc_set_vao(p->sc, mpgl_osd_get_vao(p->osd));
-        gl_sc_gen_shader_and_reset(p->sc);
+        gl_sc_gen_shader_and_reset(p->sc, p->log, GL_FRAGMENT_SHADER);
         mpgl_osd_draw_part(p->osd, vp_w, vp_h, n);
     }
     gl_sc_set_vao(p->sc, &p->vao);

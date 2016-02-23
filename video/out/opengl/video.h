@@ -34,6 +34,9 @@
 #define TEXUNIT_3DLUT    (TEXUNIT_SCALERS+4)
 #define TEXUNIT_DITHER   (TEXUNIT_3DLUT+1)
 
+// Image units (used by compute shaders)
+#define IMGUNIT_COMPUTE_OUT 0
+
 struct lut3d {
     uint16_t *data;
     int size[3];

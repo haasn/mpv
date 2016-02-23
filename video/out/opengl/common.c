@@ -338,6 +338,17 @@ static const struct gl_functions gl_functions[] = {
             {0}
         },
     },
+    // compute shader extension, requires OpenGL 4.3
+    {
+        .ver_core = 430,
+        .extension = "GL_ARB_compute_shader",
+        .provides = MPGL_CAP_COMPUTE,
+        .functions = (const struct gl_function[]) {
+            DEF_FN(DispatchCompute),
+            DEF_FN(BindImageTexture),
+            {0}
+        },
+    },
 };
 
 #undef FN_OFFS

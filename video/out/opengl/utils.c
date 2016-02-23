@@ -346,8 +346,11 @@ bool fbotex_init(struct fbotex *fbo, GL *gl, struct mp_log *log, int w, int h,
 
 // Like fbotex_init(), except it can be called on an already initialized FBO;
 // and if the parameters are the same as the previous call, do not touch it.
-// flags can be 0, or a combination of FBOTEX_FUZZY_W and FBOTEX_FUZZY_H.
+// flags can be 0, or a combination of FBOTEX_FUZZY_W, FBOTEX_FUZZY_H and
+// FBOTEX_COMPUTE.
 // Enabling FUZZY for W or H means the w or h does not need to be exact.
+// FBOTEX_COMPUTE means that the texture will be written to by a compute shader
+// instead of actually being attached to an FBO.
 bool fbotex_change(struct fbotex *fbo, GL *gl, struct mp_log *log, int w, int h,
                    GLenum iformat, int flags)
 {
@@ -394,7 +397,6 @@ bool fbotex_change(struct fbotex *fbo, GL *gl, struct mp_log *log, int w, int h,
     if (!(gl->mpgl_caps & MPGL_CAP_FB))
         return false;
 
-    gl->GenFramebuffers(1, &fbo->fbo);
     gl->GenTextures(1, &fbo->texture);
     gl->BindTexture(GL_TEXTURE_2D, fbo->texture);
     gl->TexImage2D(GL_TEXTURE_2D, 0, format.internal_format, fbo->w, fbo->h, 0,
@@ -407,20 +409,23 @@ bool fbotex_change(struct fbotex *fbo, GL *gl, struct mp_log *log, int w, int h,
 
     glCheckError(gl, log, "after creating framebuffer texture");
 
-    gl->BindFramebuffer(GL_FRAMEBUFFER, fbo->fbo);
-    gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                             GL_TEXTURE_2D, fbo->texture, 0);
+    bool skip_fbo = flags & FBOTEX_COMPUTE;
+    if (!skip_fbo) {
+        gl->GenFramebuffers(1, &fbo->fbo);
+        gl->BindFramebuffer(GL_FRAMEBUFFER, fbo->fbo);
+        gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                 GL_TEXTURE_2D, fbo->texture, 0);
 
-    GLenum err = gl->CheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (err != GL_FRAMEBUFFER_COMPLETE) {
-        mp_err(log, "Error: framebuffer completeness check failed (error=%d).\n",
-               (int)err);
-        res = false;
+        GLenum err = gl->CheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (err != GL_FRAMEBUFFER_COMPLETE) {
+            mp_err(log, "Error: framebuffer completeness check failed (error=%d).\n",
+                   (int)err);
+            res = false;
+        }
+
+        gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
+        glCheckError(gl, log, "after creating framebuffer");
     }
-
-    gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    glCheckError(gl, log, "after creating framebuffer");
 
     return res;
 }
@@ -679,6 +684,18 @@ void gl_sc_uniform_sampler_ui(struct gl_shader_cache *sc, char *name, int unit)
     u->v.i[0] = unit;
 }
 
+// This is technically just an image2D with the writeonly attribute assigned
+// to it, but to avoid having to add some sort of bloat for declaring custom
+// attributes we just treat it as a type in its own right
+void gl_sc_uniform_writeonly_image2D(struct gl_shader_cache *sc, char *name, int unit)
+{
+    struct sc_uniform *u = find_uniform(sc, name);
+    u->type = UT_i;
+    u->size = 1;
+    u->glsl_type = "writeonly image2D";
+    u->v.i[0] = unit;
+}
+
 void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, GLfloat f)
 {
     struct sc_uniform *u = find_uniform(sc, name);
@@ -825,6 +842,16 @@ static void update_uniform(GL *gl, GLuint program, struct sc_uniform *u)
     }
 }
 
+static const char *shader_typestr(GLenum type)
+{
+    switch (type) {
+        case GL_VERTEX_SHADER:   return "vertex";
+        case GL_FRAGMENT_SHADER: return "fragment";
+        case GL_COMPUTE_SHADER:  return "compute";
+        default: abort();
+    }
+}
+
 static void compile_attach_shader(struct gl_shader_cache *sc, GLuint program,
                                   GLenum type, const char *source)
 {
@@ -839,7 +866,7 @@ static void compile_attach_shader(struct gl_shader_cache *sc, GLuint program,
     gl->GetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
 
     int pri = status ? (log_length > 1 ? MSGL_V : MSGL_DEBUG) : MSGL_ERR;
-    const char *typestr = type == GL_VERTEX_SHADER ? "vertex" : "fragment";
+    const char *typestr = shader_typestr(type);
     if (mp_msg_test(sc->log, pri)) {
         MP_MSG(sc, pri, "%s shader source:\n", typestr);
         mp_log_source(sc->log, pri, source);
@@ -874,8 +901,9 @@ static void link_shader(struct gl_shader_cache *sc, GLuint program)
     }
 }
 
-static GLuint create_program(struct gl_shader_cache *sc, const char *vertex,
-                             const char *frag)
+// 'type' can be GL_COMPUTE_SHADER or GL_FRAGMENT_SHADER
+static GLuint create_program(struct gl_shader_cache *sc, GLenum type,
+                             const char *vert, const char *frag, const char *comp)
 {
     GL *gl = sc->gl;
     MP_VERBOSE(sc, "recompiling a shader program:\n");
@@ -886,12 +914,23 @@ static GLuint create_program(struct gl_shader_cache *sc, const char *vertex,
     }
     mp_log_source(sc->log, MSGL_V, sc->text);
     GLuint prog = gl->CreateProgram();
-    compile_attach_shader(sc, prog, GL_VERTEX_SHADER, vertex);
-    compile_attach_shader(sc, prog, GL_FRAGMENT_SHADER, frag);
-    for (int n = 0; sc->vao->entries[n].name; n++) {
-        char vname[80];
-        snprintf(vname, sizeof(vname), "vertex_%s", sc->vao->entries[n].name);
-        gl->BindAttribLocation(prog, n, vname);
+
+    if (type == GL_COMPUTE_SHADER) {
+        assert(comp);
+        compile_attach_shader(sc, prog, GL_COMPUTE_SHADER, comp);
+    } else if (type == GL_FRAGMENT_SHADER) {
+        assert(vert);
+        assert(frag);
+        compile_attach_shader(sc, prog, GL_VERTEX_SHADER, vert);
+        compile_attach_shader(sc, prog, GL_FRAGMENT_SHADER, frag);
+
+        for (int n = 0; sc->vao->entries[n].name; n++) {
+            char vname[80];
+            snprintf(vname, sizeof(vname), "vertex_%s", sc->vao->entries[n].name);
+            gl->BindAttribLocation(prog, n, vname);
+        }
+    } else {
+        abort();
     }
     link_shader(sc, prog);
     return prog;
@@ -906,7 +945,9 @@ static GLuint create_program(struct gl_shader_cache *sc, const char *vertex,
 // 3. Make the new shader program current (glUseProgram()).
 // 4. Reset the sc state and prepare for a new shader program. (All uniforms
 //    and fragment operations needed for the next program have to be re-added.)
-void gl_sc_gen_shader_and_reset(struct gl_shader_cache *sc)
+// 'type' can be GL_FRAGMENT_SHADER or GL_COMPUTE_SHADER
+void gl_sc_gen_shader_and_reset(struct gl_shader_cache *sc, struct mp_log *log,
+                                GLenum type)
 {
     GL *gl = sc->gl;
     void *tmp = talloc_new(NULL);
@@ -923,70 +964,95 @@ void gl_sc_gen_shader_and_reset(struct gl_shader_cache *sc)
     char *vert_out = gl->glsl_version >= 130 ? "out" : "varying";
     char *frag_in = gl->glsl_version >= 130 ? "in" : "varying";
 
-    // vertex shader: we don't use the vertex shader, so just setup a dummy,
-    // which passes through the vertex array attributes.
-    char *vert_head = talloc_strdup(tmp, header);
-    char *vert_body = talloc_strdup(tmp, "void main() {\n");
-    char *frag_vaos = talloc_strdup(tmp, "");
-    for (int n = 0; sc->vao->entries[n].name; n++) {
-        const struct gl_vao_entry *e = &sc->vao->entries[n];
-        const char *glsl_type = vao_glsl_type(e);
-        if (strcmp(e->name, "position") == 0) {
-            // setting raster pos. requires setting gl_Position magic variable
-            assert(e->num_elems == 2 && e->type == GL_FLOAT);
-            ADD(vert_head, "%s vec2 vertex_position;\n", vert_in);
-            ADD(vert_body, "gl_Position = vec4(vertex_position, 1.0, 1.0);\n");
-        } else {
-            ADD(vert_head, "%s %s vertex_%s;\n", vert_in, glsl_type, e->name);
-            ADD(vert_head, "%s %s %s;\n", vert_out, glsl_type, e->name);
-            ADD(vert_body, "%s = vertex_%s;\n", e->name, e->name);
-            ADD(frag_vaos, "%s %s %s;\n", frag_in, glsl_type, e->name);
+    char *key, *comp = NULL, *vert = NULL, *frag = NULL;
+
+    if (type == GL_COMPUTE_SHADER) {
+        comp = talloc_strdup(tmp, header);
+
+        for (int n = 0; n < sc->num_uniforms; n++) {
+            struct sc_uniform *u = &sc->uniforms[n];
+            if (u->type == UT_buffer) {
+                ADD(comp, "uniform %s { %s };\n", u->name, u->v.buffer.text);
+            } else {
+                ADD(comp, "uniform %s %s;\n", u->glsl_type, u->name);
+            }
         }
-    }
-    ADD(vert_body, "}\n");
-    char *vert = talloc_asprintf(tmp, "%s%s", vert_head, vert_body);
 
-    // fragment shader; still requires adding used uniforms and VAO elements
-    char *frag = talloc_strdup(tmp, header);
-    ADD(frag, "#define RG %s\n", gl->mpgl_caps & MPGL_CAP_TEX_RG ? "rg" : "ra");
-    if (gl->glsl_version >= 130) {
-        ADD(frag, "#define texture1D texture\n");
-        ADD(frag, "#define texture3D texture\n");
-        ADD(frag, "out vec4 out_color;\n");
+        // compute shaders must declare their layout etc. via header_text
+        ADD(comp, "%s\n", sc->header_text);
+        ADD(comp, "void main() {\n");
+        ADD(comp, "%s", sc->text);
+        ADD(comp, "}\n");
+        key = comp;
+    } else if (type == GL_FRAGMENT_SHADER) {
+        // vertex shader: we don't use the vertex shader, so just setup a dummy,
+        // which passes through the vertex array attributes.
+        char *vert_head = talloc_strdup(tmp, header);
+        char *vert_body = talloc_strdup(tmp, "void main() {\n");
+        char *frag_vaos = talloc_strdup(tmp, "");
+        for (int n = 0; sc->vao->entries[n].name; n++) {
+            const struct gl_vao_entry *e = &sc->vao->entries[n];
+            const char *glsl_type = vao_glsl_type(e);
+            if (strcmp(e->name, "position") == 0) {
+                // setting raster pos. requires setting gl_Position magic variable
+                assert(e->num_elems == 2 && e->type == GL_FLOAT);
+                ADD(vert_head, "%s vec2 vertex_position;\n", vert_in);
+                ADD(vert_body, "gl_Position = vec4(vertex_position, 1.0, 1.0);\n");
+            } else {
+                ADD(vert_head, "%s %s vertex_%s;\n", vert_in, glsl_type, e->name);
+                ADD(vert_head, "%s %s %s;\n", vert_out, glsl_type, e->name);
+                ADD(vert_body, "%s = vertex_%s;\n", e->name, e->name);
+                ADD(frag_vaos, "%s %s %s;\n", frag_in, glsl_type, e->name);
+            }
+        }
+        ADD(vert_body, "}\n");
+        vert = talloc_asprintf(tmp, "%s%s", vert_head, vert_body);
+
+        // fragment shader; still requires adding used uniforms and VAO elements
+        frag = talloc_strdup(tmp, header);
+        ADD(frag, "#define RG %s\n", gl->mpgl_caps & MPGL_CAP_TEX_RG ? "rg" : "ra");
+        if (gl->glsl_version >= 130) {
+            ADD(frag, "#define texture1D texture\n");
+            ADD(frag, "#define texture3D texture\n");
+            ADD(frag, "out vec4 out_color;\n");
+        } else {
+            ADD(frag, "#define texture texture2D\n");
+        }
+        ADD(frag, "%s", frag_vaos);
+        for (int n = 0; n < sc->num_uniforms; n++) {
+            struct sc_uniform *u = &sc->uniforms[n];
+            if (u->type == UT_buffer) {
+                ADD(frag, "uniform %s { %s };\n", u->name, u->v.buffer.text);
+            } else {
+                ADD(frag, "uniform %s %s;\n", u->glsl_type, u->name);
+            }
+        }
+
+        // Additional helpers.
+        ADD(frag, "#define LUT_POS(x, lut_size)"
+                  " mix(0.5 / (lut_size), 1.0 - 0.5 / (lut_size), (x))\n");
+
+        // custom shader header
+        if (sc->header_text[0]) {
+            ADD(frag, "// header\n");
+            ADD(frag, "%s\n", sc->header_text);
+            ADD(frag, "// body\n");
+        }
+        ADD(frag, "void main() {\n");
+        // we require _all_ frag shaders to write to a "vec4 color"
+        ADD(frag, "vec4 color;\n");
+        ADD(frag, "%s", sc->text);
+        if (gl->glsl_version >= 130) {
+            ADD(frag, "out_color = color;\n");
+        } else {
+            ADD(frag, "gl_FragColor = color;\n");
+        }
+        ADD(frag, "}\n");
+        key = talloc_asprintf(tmp, "%s%s", vert, frag);
     } else {
-        ADD(frag, "#define texture texture2D\n");
-    }
-    ADD(frag, "%s", frag_vaos);
-    for (int n = 0; n < sc->num_uniforms; n++) {
-        struct sc_uniform *u = &sc->uniforms[n];
-        if (u->type == UT_buffer)
-            ADD(frag, "uniform %s { %s };\n", u->name, u->v.buffer.text);
-        else
-            ADD(frag, "uniform %s %s;\n", u->glsl_type, u->name);
+        abort();
     }
 
-    // Additional helpers.
-    ADD(frag, "#define LUT_POS(x, lut_size)"
-              " mix(0.5 / (lut_size), 1.0 - 0.5 / (lut_size), (x))\n");
-
-    // custom shader header
-    if (sc->header_text[0]) {
-        ADD(frag, "// header\n");
-        ADD(frag, "%s\n", sc->header_text);
-        ADD(frag, "// body\n");
-    }
-    ADD(frag, "void main() {\n");
-    // we require _all_ frag shaders to write to a "vec4 color"
-    ADD(frag, "vec4 color;\n");
-    ADD(frag, "%s", sc->text);
-    if (gl->glsl_version >= 130) {
-        ADD(frag, "out_color = color;\n");
-    } else {
-        ADD(frag, "gl_FragColor = color;\n");
-    }
-    ADD(frag, "}\n");
-
-    char *key = talloc_asprintf(tmp, "%s%s", vert, frag);
     struct sc_entry *entry = NULL;
     for (int n = 0; n < sc->num_entries; n++) {
         if (strcmp(key, sc->entries[n].key) == 0) {
@@ -1000,9 +1066,9 @@ void gl_sc_gen_shader_and_reset(struct gl_shader_cache *sc)
         entry = &sc->entries[sc->num_entries++];
         *entry = (struct sc_entry){.key = talloc_strdup(NULL, key)};
     }
-    // build vertex shader from vao
+    // build shader program if not cached
     if (!entry->gl_shader)
-        entry->gl_shader = create_program(sc, vert, frag);
+        entry->gl_shader = create_program(sc, type, vert, frag, comp);
 
     gl->UseProgram(entry->gl_shader);
 
