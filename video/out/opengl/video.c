@@ -179,6 +179,10 @@ struct gl_video {
     struct fbosurface surfaces[FBOSURFACES_MAX];
     struct fbotex integer_conv_fbo[TEXUNIT_VIDEO_NUM];
 
+    // for testing
+    struct fbotex compute_fbo_in;
+    struct fbotex compute_fbo_out;
+
     // these are duplicated so we can keep rendering back and forth between
     // them to support an unlimited number of shader passes per step
     struct fbotex pre_fbo[2];
@@ -653,6 +657,10 @@ static void uninit_rendering(struct gl_video *p)
     fbotex_uninit(&p->blend_subs_fbo);
     fbotex_uninit(&p->unsharp_fbo);
     fbotex_uninit(&p->deband_fbo);
+
+    // test
+    fbotex_uninit(&p->compute_fbo_in);
+    fbotex_uninit(&p->compute_fbo_out);
 
     for (int n = 0; n < 4; n++)
         fbotex_uninit(&p->integer_conv_fbo[n]);
@@ -2014,6 +2022,18 @@ static void pass_render_frame(struct gl_video *p)
     p->use_linear = p->opts.linear_scaling || p->opts.sigmoid_upscaling;
     pass_read_video(p);
     pass_convert_yuv(p);
+
+    // Test compute shaders
+    {
+        assert(p->gl->mpgl_caps & MPGL_CAP_COMPUTE);
+        finish_pass_fbo(p, &p->compute_fbo_in, p->texture_w, p->texture_h, 0, 0);
+        GLSL(ivec2 pos = ivec2(gl_GlobalInvocationID.xy);)
+        GLSL(vec4 color = texelFetch(texture0, pos, 0).ggga;)
+        GLSL(imageStore(image, pos, color);)
+        finish_pass_compute(p, &p->compute_fbo_out, p->texture_w, p->texture_h,
+                            0, 0, 16, 16);
+        GLSL(color = texture(texture0, texcoord0);)
+    }
 
     // For subtitles
     double vpts = p->image.mpi->pts;
