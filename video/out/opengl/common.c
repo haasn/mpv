@@ -236,6 +236,21 @@ static const struct gl_functions gl_functions[] = {
             {0}
         },
     },
+    {
+        .ver_core = 320,
+        .extension = "GL_ARB_timer_query",
+        .functions = (const struct gl_function[]) {
+            DEF_FN(GenQueries),
+            DEF_FN(DeleteQueries),
+            DEF_FN(QueryCounter),
+            DEF_FN(GetQueryObjectiv),
+            DEF_FN(GetQueryObjecti64v),
+            DEF_FN(GetQueryObjectui64v),
+            // Unclear whether it must exist for the extension
+            DEF_FN(GetInteger64v),
+            {0}
+        },
+    },
     // Swap control, always an OS specific extension
     // The OSX code loads this manually.
     {

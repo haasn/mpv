@@ -48,6 +48,7 @@
 #include "opengl/lcms.h"
 
 #define NUM_VSYNC_FENCES 10
+#define NUM_VSYNC_QUERIES 10
 
 struct gl_priv {
     struct vo *vo;
@@ -85,6 +86,10 @@ struct gl_priv {
 
     GLsync vsync_fences[NUM_VSYNC_FENCES];
     int num_vsync_fences;
+
+    GLuint vsync_queries[NUM_VSYNC_QUERIES];
+    GLint64 vsync_starts[NUM_VSYNC_QUERIES];
+    int num_vsync_queries;
 };
 
 static void resize(struct gl_priv *p)
@@ -140,6 +145,40 @@ static void flip_page(struct vo *vo)
 {
     struct gl_priv *p = vo->priv;
     GL *gl = p->gl;
+
+    assert(gl->QueryCounter);
+
+    GLint64 glnow = 0;
+    gl->GetInteger64v(GL_TIMESTAMP, &glnow);
+static int relframe;
+    if (p->num_vsync_queries >= NUM_VSYNC_QUERIES) {
+        MP_WARN(vo, "underflwo!!!!!\n");
+    } else {
+        gl->GenQueries(1, &p->vsync_queries[p->num_vsync_queries]);
+        gl->QueryCounter(p->vsync_queries[p->num_vsync_queries], GL_TIMESTAMP);
+        p->vsync_starts[p->num_vsync_queries] = glnow;
+        p->num_vsync_queries++;
+        relframe++;
+    }
+    while (p->num_vsync_queries) {
+        GLint ok = 0;
+        gl->GetQueryObjectiv(p->vsync_queries[0], GL_QUERY_RESULT_AVAILABLE, &ok);
+        if (!ok)
+            break;
+        relframe--;
+        GLint64 t = 0;
+        gl->GetQueryObjectui64v(p->vsync_queries[0], GL_QUERY_RESULT, &t);
+        if (t) {
+            int64_t dur = t - p->vsync_starts[0];
+            MP_WARN(vo, "frame %d took: %f ms, issued before %f ms\n", p->frames_rendered - relframe, dur / 1e6,
+                (glnow - p->vsync_starts[0]) / 1e6);
+        } else
+            abort();
+        gl->DeleteQueries(1, &p->vsync_queries[0]);
+        int d = p->num_vsync_queries;
+        MP_TARRAY_REMOVE_AT(p->vsync_queries, p->num_vsync_queries, 0);
+        MP_TARRAY_REMOVE_AT(p->vsync_starts, d, 0);
+    }
 
     mpgl_swap_buffers(p->glctx);
 
