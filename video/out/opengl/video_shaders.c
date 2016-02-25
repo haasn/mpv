@@ -106,6 +106,62 @@ void pass_sample_separated_gen(struct gl_shader_cache *sc, struct scaler *scaler
     GLSLF("}\n");
 }
 
+void pass_compute_polar(struct gl_shader_cache *sc, struct scaler *scaler,
+                        int wsize)
+{
+    double radius = scaler->kernel->f.radius;
+    int bound = (int)ceil(radius);
+    GLSL(vec4 color = vec4(0.0);)
+    GLSL(float wsum = 8*8;)
+
+    GLSL(ivec2 g_base = ivec2(floor(pos));)
+    GLSL( vec2 g_frac = fract(pos);)
+    GLSL(ivec2 w_base = ivec2(floor(texmap0(w_id*w_sz)));)
+    GLSLF("ivec2 offset = ivec2(%d);\n", bound-1);
+    GLSL(ivec2 base = l_id/3+offset;)
+
+    // Load a local region of the input image into shmem. We need to load all
+    // pixels that will eventually be accessed, which includes everything from
+    // (base_min - bound + 1) to (base_max + bound), inclusive.
+    // XXX: for testing, let's just assume base_max-base_min = wsize (1:1)
+    //int input_size = wsize/2 + 2*bound;
+    //GLSLHF("shared vec4 input[%d][%d];\n", input_size, input_size);
+    GLSLH(shared vec4 input[16][16];)
+    //GLSLF("if (l_id.x < %d && l_id.y < %d) {\n", input_size, input_size);
+    GLSL(input[l_id.x][l_id.y] = texelFetch(tex, w_base-offset+ivec2(l_id), 0);)
+    //GLSLF("}\n");
+
+    // Load the weights LUT into shmem
+    gl_sc_uniform_sampler(sc, "lut", scaler->gl_target,
+                          TEXUNIT_SCALERS + scaler->index);
+
+    /*
+    GLSLHF("shared float LUT[%d];\n", scaler->lut_size);
+    GLSLF("if (l_idx < %d) {\n", scaler->lut_size);
+    GLSL(LUT[l_idx] = texelFetch(lut, int(l_idx), 0).x;)
+    GLSLF("}\n");
+    */
+
+    // Synchronize the threads
+    GLSL(groupMemoryBarrier();) // ensure shmem writes are visible
+    GLSL(barrier();)            // all threads have reached this point
+
+    GLSLH(#pragma optionNV (unroll all))
+    GLSLF("for (int y = %d; y <= %d; y++) {\n", 1-bound, bound);
+    GLSLF("for (int x = %d; x <= %d; x++) {\n", 1-bound, bound);
+    //GLSLF("float d = length(vec2(x,y) - l_frac)/%f;\n", radius);
+    //GLSL(if (d > 0.99) continue;)
+    //GLSL(d = min(d, 1.0);)
+    //GLSLF("float w = LUT[int(d * %d)];\n", scaler->lut_size);
+    //GLSL(if (w < 0.01) continue;)
+    //GLSL(wsum  += w;)
+    GLSL(color += input[base.x+x][base.y+y];)
+    GLSLF("}\n");
+    GLSLF("}\n");
+
+    GLSL(imageStore(image, ivec2(g_id), color / vec4(wsum));)
+}
+
 void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler)
 {
     double radius = scaler->kernel->f.radius;

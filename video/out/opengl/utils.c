@@ -454,6 +454,15 @@ void fbotex_uninit(struct fbotex *fbo)
     }
 }
 
+// Transform an mp_rect_f into a flat transformation mapping [0,1] to this rect
+void mp_rect_f_to_gl_transform(struct gl_transform *t, struct mp_rect_f r)
+{
+    t->m[0][0] = (r.x1 - r.x0);
+    t->m[1][1] = (r.y1 - r.y0);
+    t->m[0][1] = t->m[1][0] = 0.0f;
+    t->t[0] = r.x0;
+    t->t[1] = r.y0;
+}
 // Standard parallel 2D projection, except y1 < y0 means that the coordinate
 // system is flipped, not the projection.
 void gl_transform_ortho(struct gl_transform *t, float x0, float x1,

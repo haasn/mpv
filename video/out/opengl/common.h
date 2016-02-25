@@ -187,6 +187,8 @@ struct GL {
     void (GLAPIENTRY *DeleteSync)(GLsync sync);
 
     void (GLAPIENTRY *GenQueries)(GLsizei, GLuint *);
+    void (GLAPIENTRY *BeginQuery)(GLenum, GLuint);
+    void (GLAPIENTRY *EndQuery)(GLenum);
     void (GLAPIENTRY *DeleteQueries)(GLsizei, const GLuint *);
     void (GLAPIENTRY *QueryCounter)(GLuint, GLenum);
     void (GLAPIENTRY *GetQueryObjectiv)(GLuint, GLenum, GLint *);

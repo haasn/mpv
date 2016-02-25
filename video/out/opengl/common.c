@@ -241,6 +241,8 @@ static const struct gl_functions gl_functions[] = {
         .extension = "GL_ARB_timer_query",
         .functions = (const struct gl_function[]) {
             DEF_FN(GenQueries),
+            DEF_FN(BeginQuery),
+            DEF_FN(EndQuery),
             DEF_FN(DeleteQueries),
             DEF_FN(QueryCounter),
             DEF_FN(GetQueryObjectiv),

@@ -115,6 +115,8 @@ static inline void gl_transform_rect(struct gl_transform t, struct mp_rect_f *r)
 
 void gl_transform_trans(struct gl_transform t, struct gl_transform *x);
 
+void mp_rect_f_to_gl_transform(struct gl_transform *t, struct mp_rect_f r);
+
 void gl_set_debug_logger(GL *gl, struct mp_log *log);
 
 struct gl_shader_cache;

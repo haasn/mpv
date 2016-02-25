@@ -526,6 +526,7 @@ static void get_scale_factors(struct gl_video *p, double xy[2]);
 
 #define GLSL(x) gl_sc_add(p->sc, #x "\n");
 #define GLSLF(...) gl_sc_addf(p->sc, __VA_ARGS__)
+#define GLSLH(x) gl_sc_hadd(p->sc, #x "\n");
 
 // Return a fixed point texture format with given characteristics.
 static const struct fmt_entry *find_tex_format(GL *gl, int bytes_per_comp,
@@ -988,6 +989,15 @@ static void finish_pass_compute(struct gl_video *p, struct fbotex *dst_fbo,
 {
     GL *gl = p->gl;
 
+    // Add some extra sanity redefinitions because who comes up with these
+    // enterprise-ready variable names?
+    gl_sc_hadd(p->sc, "#define g_id  gl_GlobalInvocationID\n");
+    gl_sc_hadd(p->sc, "#define l_id  gl_LocalInvocationID\n");
+    gl_sc_hadd(p->sc, "#define l_idx gl_LocalInvocationIndex\n");
+    gl_sc_hadd(p->sc, "#define w_id  gl_WorkGroupID\n");
+    gl_sc_hadd(p->sc, "#define w_sz  gl_WorkGroupSize\n");
+    gl_sc_hadd(p->sc, "#define w_num gl_NumWorkGroups\n");
+
     // As the "target" of a compute shader, we re-use our FBO helpers to
     // generate/update an appropriately sized texture. FBOTEX_COMPUTE signals
     // that we're going to directly draw to it instead of using an actual FBO.
@@ -998,6 +1008,29 @@ static void finish_pass_compute(struct gl_video *p, struct fbotex *dst_fbo,
                          0, GL_FALSE, 0, GL_WRITE_ONLY, dst_fbo->iformat);
 
     pass_prepare_src_tex(p);
+
+    // Since we don't actually have vertices, we pretend for convenience
+    // reasons that we do and provide a function mapping from the ID space to
+    // the texture coordinates for every texture.
+    // Note that we map the coordinates on the full image size range, rather
+    // than on the range 0-1, which makes everything easier
+
+    for (int n = 0; n < TEXUNIT_VIDEO_NUM; n++) {
+        struct src_tex *s = &p->pass_tex[n];
+        if (!s->gl_tex)
+            continue;
+
+        struct gl_transform tx;
+        mp_rect_f_to_gl_transform(&tx, s->src);
+
+        // We subtract a half-pixel to make sure the coordinate grid is aligned
+        // with pixel centers
+        gl_sc_haddf(p->sc,
+            "#define texmap%d(id) (vec2(%f,%f) * vec2(id) + vec2(%f,%f))\n", n,
+            tx.m[0][0] / w, tx.m[1][1] / h, tx.t[0] - 0.5f, tx.t[1] - 0.5f);
+        gl_sc_haddf(p->sc, "vec2 texcoord%d = texmap%d(g_id);\n", n, n);
+    }
+
     gl_sc_haddf(p->sc, "layout (local_size_x = %d, local_size_y = %d) in;\n",
                 block_w, block_h);
     gl_sc_gen_shader_and_reset(p->sc, p->log, GL_COMPUTE_SHADER);
@@ -1233,6 +1266,13 @@ static void pass_sample(struct gl_video *p, int src_tex, struct scaler *scaler,
     if (!scaler->kernel || scaler->kernel->polar)
         gl_transform_rect(transform, &p->pass_tex[src_tex].src);
 
+    /*
+    GL *gl = p->gl;
+    GLuint query;
+    GLuint64 result;
+    gl->GenQueries(1, &query);
+    */
+
     // Dispatch the scaler. They're all wildly different.
     const char *name = scaler->conf.kernel.name;
     if (strcmp(name, "bilinear") == 0) {
@@ -1252,12 +1292,27 @@ static void pass_sample(struct gl_video *p, int src_tex, struct scaler *scaler,
         }
     } else if (scaler->kernel && scaler->kernel->polar) {
         pass_sample_polar(p->sc, scaler);
+#define COMPUTE_WORK_SIZE 16
+        /*
+        pass_compute_polar(p->sc, scaler, COMPUTE_WORK_SIZE);
+        gl->BeginQuery(GL_TIME_ELAPSED, query);
+        finish_pass_compute(p, &scaler->sep_fbo, w, h, 0, 0,
+                COMPUTE_WORK_SIZE, COMPUTE_WORK_SIZE);
+        gl->EndQuery(GL_TIME_ELAPSED);
+        GLSL(color = texture(texture0, texcoord0);)
+        */
     } else if (scaler->kernel) {
         pass_sample_separated(p, src_tex, scaler, w, h, transform);
     } else {
         // Should never happen
         abort();
     }
+
+    /*
+    gl->GetQueryObjectui64v(query, GL_QUERY_RESULT, &result);
+    gl->DeleteQueries(1, &query);
+    MP_WARN(p, "%f μs/frame for compute work\n", result*1.e-3);
+    */
 
     // Micro-optimization: Avoid scaling unneeded channels
     if (!p->has_alpha || p->opts.alpha_mode != 1)
@@ -2011,6 +2066,7 @@ static void pass_render_frame_dumb(struct gl_video *p, int fbo)
 // upscaling. p->image is rendered.
 static void pass_render_frame(struct gl_video *p)
 {
+    GL *gl = p->gl;
     // initialize the texture parameters
     p->texture_w = p->image_params.w;
     p->texture_h = p->image_params.h;
@@ -2024,16 +2080,49 @@ static void pass_render_frame(struct gl_video *p)
     pass_convert_yuv(p);
 
     // Test compute shaders
+    finish_pass_fbo(p, &p->compute_fbo_in, p->texture_w, p->texture_h, 0, 0);
+    GLuint query;
+    GLuint64 result;
+    gl->GenQueries(1, &query);
+    gl->BeginQuery(GL_TIME_ELAPSED, query);
     {
         assert(p->gl->mpgl_caps & MPGL_CAP_COMPUTE);
-        finish_pass_fbo(p, &p->compute_fbo_in, p->texture_w, p->texture_h, 0, 0);
-        GLSL(ivec2 pos = ivec2(gl_GlobalInvocationID.xy);)
-        GLSL(vec4 color = texelFetch(texture0, pos, 0).ggga;)
-        GLSL(imageStore(image, pos, color);)
+        GLSLH(shared vec4 input[256];)
+        GLSL(input[l_idx] = texelFetch(texture0, ivec2(g_id), 0);)
+
+        //GLSL(input[gl_LocalInvocationID.x][gl_LocalInvocationID.y] = texelFetch(texture0, ivec2(gl_GlobalInvocationID), 0);)
+        GLSL(groupMemoryBarrier();)
+        GLSL(barrier();)
+        GLSL(vec4 color = vec4(0);)
+        GLSL(int offset = int(l_id.x);)
+        GLSL(#pragma optionNV (unroll all))
+        GLSLF("for (int i = 0; i < 64; i++) {\n");
+        GLSL(color += input[offset+i];)
+        GLSLF("}\n");
+        GLSL(color = color/64;)
+        GLSL(imageStore(image, ivec2(g_id), color);)
         finish_pass_compute(p, &p->compute_fbo_out, p->texture_w, p->texture_h,
                             0, 0, 16, 16);
-        GLSL(color = texture(texture0, texcoord0);)
+
+        /*
+        GLSL(vec2 num_blocks = texture_size0 / 32.0;)
+        GLSL(vec2 pos = floor(texcoord0 * num_blocks) / num_blocks;)
+        GLSL(vec2 pt = vec2(2.0) / texture_size0;)
+        GLSL(color = vec4(0, 0, 0, 1);)
+        GLSLF("for (int x = 0; x < 8; x++) {\n");
+        GLSLF("for (int y = 0; y < 8; y++) {\n");
+        GLSL(color += texture(texture0, pos + pt * vec2(x,y));)
+        GLSLF("} }\n");
+        GLSL(color = color/(8*8);)
+        finish_pass_fbo(p, &p->compute_fbo_out, p->texture_w, p->texture_h, 0, 0);
+        */
     }
+    gl->EndQuery(GL_TIME_ELAPSED);
+    gl->GetQueryObjectui64v(query, GL_QUERY_RESULT, &result);
+    gl->DeleteQueries(1, &query);
+    GLSL(color = texture(texture0, texcoord0);)
+
+    MP_WARN(p, "%f μs/frame for compute work\n", result*1.e-3);
 
     // For subtitles
     double vpts = p->image.mpi->pts;

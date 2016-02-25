@@ -30,6 +30,8 @@ extern const struct m_sub_options deband_conf;
 void sampler_prelude(struct gl_shader_cache *sc, int tex_num);
 void pass_sample_separated_gen(struct gl_shader_cache *sc, struct scaler *scaler,
                                int d_x, int d_y);
+void pass_compute_polar(struct gl_shader_cache *sc, struct scaler *scaler,
+                        int wsize);
 void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler);
 void pass_sample_bicubic_fast(struct gl_shader_cache *sc);
 void pass_sample_oversample(struct gl_shader_cache *sc, struct scaler *scaler,

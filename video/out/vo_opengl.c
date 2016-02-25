@@ -170,8 +170,6 @@ static int relframe;
         gl->GetQueryObjectui64v(p->vsync_queries[0], GL_QUERY_RESULT, &t);
         if (t) {
             int64_t dur = t - p->vsync_starts[0];
-            MP_WARN(vo, "frame %d took: %f ms, issued before %f ms\n", p->frames_rendered - relframe, dur / 1e6,
-                (glnow - p->vsync_starts[0]) / 1e6);
         } else
             abort();
         gl->DeleteQueries(1, &p->vsync_queries[0]);
