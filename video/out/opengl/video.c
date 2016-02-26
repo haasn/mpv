@@ -974,6 +974,7 @@ static void uninit_scaler(struct gl_video *p, struct scaler *scaler)
     GL *gl = p->gl;
     fbotex_uninit(&scaler->sep_fbo);
     gl->DeleteTextures(1, &scaler->gl_lut);
+    talloc_free(scaler->table);
     scaler->gl_lut = 0;
     scaler->kernel = NULL;
     scaler->initialized = false;
@@ -1107,12 +1108,6 @@ static void reinit_scaler(struct gl_video *p, struct scaler *scaler,
 
     scaler->insufficient = !mp_init_filter(scaler->kernel, sizes, scale_factor);
 
-    if (scaler->kernel->polar && (gl->mpgl_caps & MPGL_CAP_1D_TEX)) {
-        scaler->gl_target = GL_TEXTURE_1D;
-    } else {
-        scaler->gl_target = GL_TEXTURE_2D;
-    }
-
     int size = scaler->kernel->size;
     int elems_per_pixel = 4;
     if (size == 1) {
@@ -1125,35 +1120,31 @@ static void reinit_scaler(struct gl_video *p, struct scaler *scaler,
     int width = size / elems_per_pixel;
     assert(size == width * elems_per_pixel);
     const struct fmt_entry *fmt = &gl_float16_formats[elems_per_pixel - 1];
-    GLenum target = scaler->gl_target;
+
+    scaler->lut_size = 1 << p->opts.scaler_lut_size;
+    float *weights = talloc_array(NULL, float, scaler->lut_size * size);
+    mp_compute_lut(scaler->kernel, scaler->lut_size, weights);
+
+    if (scaler->kernel->polar) {
+        scaler->table = talloc_steal(p, weights);
+        return;
+    }
 
     gl->ActiveTexture(GL_TEXTURE0 + TEXUNIT_SCALERS + scaler->index);
 
     if (!scaler->gl_lut)
         gl->GenTextures(1, &scaler->gl_lut);
 
-    gl->BindTexture(target, scaler->gl_lut);
+    gl->BindTexture(GL_TEXTURE_2D, scaler->gl_lut);
 
-    scaler->lut_size = 1 << p->opts.scaler_lut_size;
-
-    float *weights = talloc_array(NULL, float, scaler->lut_size * size);
-    mp_compute_lut(scaler->kernel, scaler->lut_size, weights);
-
-    if (target == GL_TEXTURE_1D) {
-        gl->TexImage1D(target, 0, fmt->internal_format, scaler->lut_size,
-                       0, fmt->format, GL_FLOAT, weights);
-    } else {
-        gl->TexImage2D(target, 0, fmt->internal_format, width, scaler->lut_size,
-                       0, fmt->format, GL_FLOAT, weights);
-    }
-
+    gl->TexImage2D(GL_TEXTURE_2D, 0, fmt->internal_format, width,
+                       scaler->lut_size, 0, fmt->format, GL_FLOAT, weights);
     talloc_free(weights);
 
-    gl->TexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    gl->TexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    gl->TexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    if (target != GL_TEXTURE_1D)
-        gl->TexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     gl->ActiveTexture(GL_TEXTURE0);
 

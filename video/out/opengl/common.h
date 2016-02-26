@@ -169,6 +169,7 @@ struct GL {
                                        GLint, GLint, GLbitfield, GLenum);
 
     void (GLAPIENTRY *Uniform1f)(GLint, GLfloat);
+    void (GLAPIENTRY *Uniform1fv)(GLint, GLsizei, const GLfloat *);
     void (GLAPIENTRY *Uniform2f)(GLint, GLfloat, GLfloat);
     void (GLAPIENTRY *Uniform3f)(GLint, GLfloat, GLfloat, GLfloat);
     void (GLAPIENTRY *Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);

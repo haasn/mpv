@@ -59,11 +59,11 @@ struct scaler {
     double scale_factor;
     bool initialized;
     struct filter_kernel *kernel;
-    GLuint gl_lut;
-    GLenum gl_target;
     struct fbotex sep_fbo;
     bool insufficient;
     int lut_size;
+    GLuint gl_lut; // used for 2D LUTs
+    float *table;  // used for 1D LUTs
 
     // kernel points here
     struct filter_kernel kernel_storage;

@@ -128,6 +128,7 @@ void gl_sc_uniform_sampler(struct gl_shader_cache *sc, char *name, GLenum target
                            int unit);
 void gl_sc_uniform_sampler_ui(struct gl_shader_cache *sc, char *name, int unit);
 void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, GLfloat f);
+void gl_sc_uniform_fv(struct gl_shader_cache *sc, char *name, GLsizei size, const GLfloat *f);
 void gl_sc_uniform_i(struct gl_shader_cache *sc, char *name, GLint f);
 void gl_sc_uniform_vec2(struct gl_shader_cache *sc, char *name, GLfloat f[2]);
 void gl_sc_uniform_vec3(struct gl_shader_cache *sc, char *name, GLfloat f[3]);

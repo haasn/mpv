@@ -514,6 +514,7 @@ enum uniform_type {
     UT_invalid,
     UT_i,
     UT_f,
+    UT_fv,
     UT_m,
     UT_buffer,
 };
@@ -527,6 +528,7 @@ struct sc_uniform {
     union {
         GLfloat f[9];
         GLint i[4];
+        void *p;
         struct {
             char* text;
             GLint binding;
@@ -688,6 +690,15 @@ void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, GLfloat f)
     u->v.f[0] = f;
 }
 
+void gl_sc_uniform_fv(struct gl_shader_cache *sc, char *name, GLsizei size, const GLfloat *f)
+{
+    struct sc_uniform *u = find_uniform(sc, name);
+    u->type = UT_fv;
+    u->size = size;
+    u->glsl_type = "float[64]";
+    u->v.p = (void *)f;
+}
+
 void gl_sc_uniform_i(struct gl_shader_cache *sc, char *name, GLint i)
 {
     struct sc_uniform *u = find_uniform(sc, name);
@@ -812,6 +823,9 @@ static void update_uniform(GL *gl, GLuint program, struct sc_uniform *u)
         case 4: gl->Uniform4f(loc, u->v.f[0], u->v.f[1], u->v.f[2], u->v.f[3]); break;
         default: abort();
         }
+        break;
+    case UT_fv:
+        gl->Uniform1fv(loc, u->size, (GLfloat *)u->v.p);
         break;
     case UT_m:
         switch (u->size) {

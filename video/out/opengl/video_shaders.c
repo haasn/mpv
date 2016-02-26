@@ -16,6 +16,7 @@
  */
 
 #include <math.h>
+#include <assert.h>
 
 #include "video_shaders.h"
 #include "video.h"
@@ -38,8 +39,7 @@ void sampler_prelude(struct gl_shader_cache *sc, int tex_num)
 static void pass_sample_separated_get_weights(struct gl_shader_cache *sc,
                                               struct scaler *scaler)
 {
-    gl_sc_uniform_sampler(sc, "lut", scaler->gl_target,
-                          TEXUNIT_SCALERS + scaler->index);
+    gl_sc_uniform_sampler(sc, "lut", GL_TEXTURE_2D, TEXUNIT_SCALERS + scaler->index);
     // Define a new variable to cache the corrected fcoord.
     GLSLF("float fcoord_lut = LUT_POS(fcoord, %d.0);\n", scaler->lut_size);
 
@@ -116,13 +116,14 @@ void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler)
     GLSL(vec2 fcoord = fract(pos * size - vec2(0.5));)
     GLSL(vec2 base = pos - fcoord * pt;)
     GLSL(vec4 c;)
+    GLSL(float l; int i;)
     GLSLF("float w, d, wsum = 0.0;\n");
     if (use_ar) {
         GLSL(vec4 lo = vec4(1.0);)
         GLSL(vec4 hi = vec4(0.0);)
     }
-    gl_sc_uniform_sampler(sc, "lut", scaler->gl_target,
-                          TEXUNIT_SCALERS + scaler->index);
+    assert(scaler->table);
+    gl_sc_uniform_fv(sc, "LUT", scaler->lut_size, scaler->table);
     GLSLF("// scaler samples\n");
     for (int y = 1-bound; y <= bound; y++) {
         for (int x = 1-bound; x <= bound; x++) {
@@ -138,13 +139,9 @@ void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler)
             // Check for samples that might be skippable
             if (dmax >= radius - M_SQRT2)
                 GLSLF("if (d < 1.0) {\n");
-            if (scaler->gl_target == GL_TEXTURE_1D) {
-                GLSLF("w = texture1D(lut, LUT_POS(d, %d.0)).r;\n",
-                      scaler->lut_size);
-            } else {
-                GLSLF("w = texture(lut, vec2(0.5, LUT_POS(d, %d.0))).r;\n",
-                      scaler->lut_size);
-            }
+            GLSLF("l = d * %d.0;\n", scaler->lut_size - 1);
+            GLSL(i = int(floor(l));)
+            GLSL(w = mix(LUT[i], LUT[i+1], fract(l));)
             GLSL(wsum += w;)
             GLSLF("c = texture(tex, base + pt * vec2(%d.0, %d.0));\n", x, y);
             GLSL(color += vec4(w) * c;)

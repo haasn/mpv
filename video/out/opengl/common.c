@@ -128,6 +128,7 @@ static const struct gl_functions gl_functions[] = {
             DEF_FN(TexParameteri),
             DEF_FN(TexSubImage2D),
             DEF_FN(Uniform1f),
+            DEF_FN(Uniform1fv),
             DEF_FN(Uniform2f),
             DEF_FN(Uniform3f),
             DEF_FN(Uniform1i),
