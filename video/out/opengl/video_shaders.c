@@ -16,6 +16,7 @@
  */
 
 #include <math.h>
+#include <assert.h>
 
 #include "video_shaders.h"
 #include "video.h"
@@ -107,59 +108,95 @@ void pass_sample_separated_gen(struct gl_shader_cache *sc, struct scaler *scaler
 }
 
 void pass_compute_polar(struct gl_shader_cache *sc, struct scaler *scaler,
-                        int wsize)
+                        int wsize, int tex, double ratio)
 {
     double radius = scaler->kernel->f.radius;
     int bound = (int)ceil(radius);
     GLSL(vec4 color = vec4(0.0);)
-    GLSL(float wsum = 8*8;)
+    GLSL(float wsum = 0.0;)
+    GLSL(float d;)
+    GLSL(float w;)
 
     GLSL(ivec2 g_base = ivec2(floor(pos));)
     GLSL( vec2 g_frac = fract(pos);)
-    GLSL(ivec2 w_base = ivec2(floor(texmap0(w_id*w_sz)));)
+    GLSLF("ivec2 w_base = ivec2(floor(texmap%d(w_id*w_sz)));\n", tex);
     GLSLF("ivec2 offset = ivec2(%d);\n", bound-1);
-    GLSL(ivec2 base = l_id/3+offset;)
+    GLSL(ivec2 base = g_base-w_base;)
 
     // Load a local region of the input image into shmem. We need to load all
     // pixels that will eventually be accessed, which includes everything from
     // (base_min - bound + 1) to (base_max + bound), inclusive.
-    // XXX: for testing, let's just assume base_max-base_min = wsize (1:1)
-    //int input_size = wsize/2 + 2*bound;
-    //GLSLHF("shared vec4 input[%d][%d];\n", input_size, input_size);
-    GLSLH(shared vec4 input[16][16];)
-    //GLSLF("if (l_id.x < %d && l_id.y < %d) {\n", input_size, input_size);
-    GLSL(input[l_id.x][l_id.y] = texelFetch(tex, w_base-offset+ivec2(l_id), 0);)
-    //GLSLF("}\n");
+    int isize = 2*bound - 1 + (int)ceil(wsize / ratio);
+    assert(wsize >= isize);
+    GLSLHF("shared vec4 input[%d];\n", isize * isize);
+    GLSLF("if (l_id.x < %d && l_id.y < %d) {\n", isize, isize);
+    GLSLF("input[l_id.y*%d + l_id.x] = texelFetch(tex, "
+          "w_base-offset+ivec2(l_id), 0);\n", isize);
+    GLSLF("}\n");
+    GLSLF("#define get(xp,yp) input[(base.y+yp)*%d + base.x+xp]\n", isize);
 
     // Load the weights LUT into shmem
+    assert(wsize * wsize >= scaler->lut_size);
     gl_sc_uniform_sampler(sc, "lut", scaler->gl_target,
                           TEXUNIT_SCALERS + scaler->index);
 
-    /*
     GLSLHF("shared float LUT[%d];\n", scaler->lut_size);
     GLSLF("if (l_idx < %d) {\n", scaler->lut_size);
     GLSL(LUT[l_idx] = texelFetch(lut, int(l_idx), 0).x;)
     GLSLF("}\n");
-    */
 
     // Synchronize the threads
     GLSL(groupMemoryBarrier();) // ensure shmem writes are visible
     GLSL(barrier();)            // all threads have reached this point
 
+    /*
     GLSLH(#pragma optionNV (unroll all))
     GLSLF("for (int y = %d; y <= %d; y++) {\n", 1-bound, bound);
     GLSLF("for (int x = %d; x <= %d; x++) {\n", 1-bound, bound);
-    //GLSLF("float d = length(vec2(x,y) - l_frac)/%f;\n", radius);
+    GLSLF("float d = length(vec2(x,y) - g_frac)/%f;\n", radius);
     //GLSL(if (d > 0.99) continue;)
-    //GLSL(d = min(d, 1.0);)
-    //GLSLF("float w = LUT[int(d * %d)];\n", scaler->lut_size);
+    GLSL(d = min(d, 1.0);)
+    GLSLF("float w = LUT[int(d * %d)];\n", scaler->lut_size);
     //GLSL(if (w < 0.01) continue;)
-    //GLSL(wsum  += w;)
-    GLSL(color += input[base.x+x][base.y+y];)
+    GLSL(wsum  += w;)
+    GLSL(color += w * get(offset.x+x,offset.y+y);)
+    //GLSL(color += input[base.x+x][base.y+y];)
     GLSLF("}\n");
     GLSLF("}\n");
+    */
+
+    GLSLF("// scaler samples\n");
+    for (int y = 1-bound; y <= bound; y++) {
+        for (int x = 1-bound; x <= bound; x++) {
+            // Since we can't know the subpixel position in advance, assume a
+            // worst case scenario
+            int yy = y > 0 ? y-1 : y;
+            int xx = x > 0 ? x-1 : x;
+            double dmax = sqrt(xx*xx + yy*yy);
+            // Skip samples definitely outside the radius
+            if (dmax >= radius)
+                continue;
+            GLSLF("d = length(vec2(%d, %d) - g_frac)/%f;\n", x, y, radius);
+            // Check for samples that might be skippable
+            if (dmax >= radius - M_SQRT2)
+                GLSLF("if (d < 1.0) {\n");
+            GLSLF("w = LUT[int(d * %d)];\n", scaler->lut_size-1);
+            GLSL(wsum += w;)
+            GLSLF("color += w * get(%d,%d);\n", bound+x-1, bound+y-1);
+            //GLSLF("color += w*input[base+%d];\n", 16*(bound+y-1) + bound+x-1);
+            //GLSLF("color += w*texelFetch(tex, g_base+ivec2(%d,%d), 0);\n", x, y);
+            //if (use_ar && x >= 0 && y >= 0 && x <= 1 && y <= 1) {
+            //    GLSL(lo = min(lo, c);)
+            //    GLSL(hi = max(hi, c);)
+            //}
+            if (dmax >= radius - M_SQRT2)
+                GLSLF("}\n");
+        }
+    }
 
     GLSL(imageStore(image, ivec2(g_id), color / vec4(wsum));)
+    //GLSL(imageStore(image, ivec2(g_id), vec4(g_base/texture_size0, 0, 1));)
+    //GLSL(imageStore(image, ivec2(g_id), vec4(base * 0.25, float(w_id.y)*0.03, 1));)
 }
 
 void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler)

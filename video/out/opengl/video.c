@@ -1266,13 +1266,6 @@ static void pass_sample(struct gl_video *p, int src_tex, struct scaler *scaler,
     if (!scaler->kernel || scaler->kernel->polar)
         gl_transform_rect(transform, &p->pass_tex[src_tex].src);
 
-    /*
-    GL *gl = p->gl;
-    GLuint query;
-    GLuint64 result;
-    gl->GenQueries(1, &query);
-    */
-
     // Dispatch the scaler. They're all wildly different.
     const char *name = scaler->conf.kernel.name;
     if (strcmp(name, "bilinear") == 0) {
@@ -1291,28 +1284,34 @@ static void pass_sample(struct gl_video *p, int src_tex, struct scaler *scaler,
             p->opts.scale_shader = NULL;
         }
     } else if (scaler->kernel && scaler->kernel->polar) {
-        pass_sample_polar(p->sc, scaler);
-#define COMPUTE_WORK_SIZE 16
-        /*
-        pass_compute_polar(p->sc, scaler, COMPUTE_WORK_SIZE);
+        //pass_sample_polar(p->sc, scaler);
+#define COMPUTE_WORK_SIZE 32
+        GL *gl = p->gl;
+        GLuint query;
+        GLuint64 result;
+        gl->GenQueries(1, &query);
+
+        double f[2];
+        get_scale_factors(p, f);
+
+        pass_compute_polar(p->sc, scaler, COMPUTE_WORK_SIZE, src_tex,
+                MPMAX(f[0], f[1]));
         gl->BeginQuery(GL_TIME_ELAPSED, query);
-        finish_pass_compute(p, &scaler->sep_fbo, w, h, 0, 0,
+        finish_pass_compute(p, &scaler->sep_fbo, w, h, src_tex, 0,
                 COMPUTE_WORK_SIZE, COMPUTE_WORK_SIZE);
         gl->EndQuery(GL_TIME_ELAPSED);
+
+        gl->GetQueryObjectui64v(query, GL_QUERY_RESULT, &result);
+        gl->DeleteQueries(1, &query);
+        MP_WARN(p, "%f μs/frame for compute work\n", result*1.e-3);
+
         GLSL(color = texture(texture0, texcoord0);)
-        */
     } else if (scaler->kernel) {
         pass_sample_separated(p, src_tex, scaler, w, h, transform);
     } else {
         // Should never happen
         abort();
     }
-
-    /*
-    gl->GetQueryObjectui64v(query, GL_QUERY_RESULT, &result);
-    gl->DeleteQueries(1, &query);
-    MP_WARN(p, "%f μs/frame for compute work\n", result*1.e-3);
-    */
 
     // Micro-optimization: Avoid scaling unneeded channels
     if (!p->has_alpha || p->opts.alpha_mode != 1)
@@ -2066,7 +2065,6 @@ static void pass_render_frame_dumb(struct gl_video *p, int fbo)
 // upscaling. p->image is rendered.
 static void pass_render_frame(struct gl_video *p)
 {
-    GL *gl = p->gl;
     // initialize the texture parameters
     p->texture_w = p->image_params.w;
     p->texture_h = p->image_params.h;
@@ -2080,6 +2078,8 @@ static void pass_render_frame(struct gl_video *p)
     pass_convert_yuv(p);
 
     // Test compute shaders
+    /*
+    GL *gl = p->gl;
     finish_pass_fbo(p, &p->compute_fbo_in, p->texture_w, p->texture_h, 0, 0);
     GLuint query;
     GLuint64 result;
@@ -2104,7 +2104,6 @@ static void pass_render_frame(struct gl_video *p)
         finish_pass_compute(p, &p->compute_fbo_out, p->texture_w, p->texture_h,
                             0, 0, 16, 16);
 
-        /*
         GLSL(vec2 num_blocks = texture_size0 / 32.0;)
         GLSL(vec2 pos = floor(texcoord0 * num_blocks) / num_blocks;)
         GLSL(vec2 pt = vec2(2.0) / texture_size0;)
@@ -2115,7 +2114,6 @@ static void pass_render_frame(struct gl_video *p)
         GLSLF("} }\n");
         GLSL(color = color/(8*8);)
         finish_pass_fbo(p, &p->compute_fbo_out, p->texture_w, p->texture_h, 0, 0);
-        */
     }
     gl->EndQuery(GL_TIME_ELAPSED);
     gl->GetQueryObjectui64v(query, GL_QUERY_RESULT, &result);
@@ -2123,6 +2121,7 @@ static void pass_render_frame(struct gl_video *p)
     GLSL(color = texture(texture0, texcoord0);)
 
     MP_WARN(p, "%f μs/frame for compute work\n", result*1.e-3);
+    */
 
     // For subtitles
     double vpts = p->image.mpi->pts;
