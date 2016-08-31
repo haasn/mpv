@@ -422,6 +422,22 @@ int m_config_apply_defaults(struct m_config *config, const char *name,
     return r;
 }
 
+struct m_config *m_config_from_obj_desc_and_args(void *ta_parent,
+    struct mp_log *log, struct mpv_global *global, struct m_obj_desc *desc,
+    const char *name, struct m_obj_settings *defaults, char **args)
+{
+    struct m_config *config = m_config_from_obj_desc(ta_parent, log, desc);
+    if (m_config_apply_defaults(config, name, defaults) < 0)
+        goto error;
+    if (m_config_set_obj_params(config, args) < 0)
+        goto error;
+
+    return config;
+error:
+    talloc_free(config);
+    return NULL;
+}
+
 static void ensure_backup(struct m_config *config, struct m_config_option *co)
 {
     if (co->opt->type->flags & M_OPT_TYPE_HAS_CHILD)
