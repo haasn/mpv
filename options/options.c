@@ -73,6 +73,7 @@ extern const struct m_sub_options ad_lavc_conf;
 extern const struct m_sub_options input_config;
 extern const struct m_sub_options encode_config;
 extern const struct m_sub_options image_writer_conf;
+extern const struct m_sub_options gl_video_conf;
 
 extern const struct m_obj_list vf_obj_list;
 extern const struct m_obj_list af_obj_list;
@@ -632,6 +633,8 @@ const m_option_t mp_opts[] = {
     OPT_STRING("screenshot-directory", screenshot_directory, 0),
 
     OPT_SUBSTRUCT("input", input_opts, input_config, 0),
+
+    OPT_SUBSTRUCT("", gl_opts, gl_video_conf, 0),
 
     OPT_PRINT("list-protocols", stream_print_proto_list),
     OPT_PRINT("help", print_help),

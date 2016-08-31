@@ -275,6 +275,15 @@ static bool is_group_included(struct m_config *config, int group, int parent)
     return false;
 }
 
+int m_config_find_group(struct m_config *config, const struct m_sub_options *group)
+{
+    for (int n = 0; n < config->num_groups; n++) {
+        if (config->groups[n].group == group)
+            return n;
+    }
+    return -1;
+}
+
 struct m_config_cache *m_config_cache_alloc(void *ta_parent, struct mp_log *log,
                                             struct mpv_global *global,
                                             const struct m_sub_options *group)
@@ -382,11 +391,39 @@ struct m_config *mp_get_root_config(struct mpv_global *global)
     return global->config->root;
 }
 
+static struct m_config *m_config_from_obj_desc_common(void *talloc_ctx,
+                                                      struct mp_log *log,
+                                                      struct m_obj_desc *desc,
+                                                      bool alloc)
+{
+    struct m_config *config = m_config_new(talloc_ctx, log,
+                                           alloc ? desc->priv_size : 0,
+                                           desc->priv_defaults, desc->options);
+
+    const struct m_sub_options *sub = desc->legacy_opts;
+    if (sub) {
+        add_options(config, NULL, NULL, sub->defaults, sub->opts);
+
+        bstr prefix = bstr0(desc->legacy_prefix);
+        for (int n = 0; n < config->num_opts; n++) {
+            struct m_config_option *co = &config->opts[n];
+            co->is_legacy = true;
+            bstr name = bstr0(co->name);
+            if (prefix.len && bstr_eatstart(&name, prefix) && name.start[0] == '-')
+            {
+                co->name = name.start + 1;
+                co->is_legacy_prefixed = true;
+            }
+        }
+    }
+
+    return config;
+}
+
 struct m_config *m_config_from_obj_desc(void *talloc_ctx, struct mp_log *log,
                                         struct m_obj_desc *desc)
 {
-    return m_config_new(talloc_ctx, log, desc->priv_size, desc->priv_defaults,
-                        desc->options);
+    return m_config_from_obj_desc_common(talloc_ctx, log, desc, true);
 }
 
 // Like m_config_from_obj_desc(), but don't allocate option struct.
@@ -394,7 +431,7 @@ struct m_config *m_config_from_obj_desc_noalloc(void *talloc_ctx,
                                                 struct mp_log *log,
                                                 struct m_obj_desc *desc)
 {
-    return m_config_new(talloc_ctx, log, 0, desc->priv_defaults, desc->options);
+    return m_config_from_obj_desc_common(talloc_ctx, log, desc, false);
 }
 
 int m_config_set_obj_params(struct m_config *conf, char **args)
@@ -426,11 +463,37 @@ struct m_config *m_config_from_obj_desc_and_args(void *ta_parent,
     struct mp_log *log, struct mpv_global *global, struct m_obj_desc *desc,
     const char *name, struct m_obj_settings *defaults, char **args)
 {
+    struct m_config *root = mp_get_root_config(global);
+
     struct m_config *config = m_config_from_obj_desc(ta_parent, log, desc);
     if (m_config_apply_defaults(config, name, defaults) < 0)
         goto error;
     if (m_config_set_obj_params(config, args) < 0)
         goto error;
+
+    for (int n = 0; args && args[n * 2 + 0]; n++) {
+        char *opt = args[n * 2 + 0];
+        char *val = args[n * 2 + 1];
+        struct m_config *target = config;
+        if (desc->legacy_opts) {
+            struct m_config_option *co = m_config_get_co(config, bstr0(opt));
+            if (co && co->is_legacy) {
+                // Painfully map back to the possibly prefixed option name.
+                char tmp[80];
+                char *orig = opt;
+                if (co->is_legacy_prefixed) {
+                    snprintf(tmp, sizeof(tmp), "%s-%s",  desc->legacy_prefix, opt);
+                    opt = tmp;
+                }
+                target = root;
+                mp_warn(log, "Using suboptions is deprecated. Use global '--%s' "
+                        "option instead of '%s' suboption.\n", opt, orig);
+            }
+        }
+        int r = m_config_set_option(target, bstr0(opt), bstr0(val));
+        if (r < 0)
+            goto error;
+    }
 
     return config;
 error:

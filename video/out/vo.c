@@ -176,6 +176,8 @@ static bool get_desc(struct m_obj_desc *dst, int index)
         .priv_size = vo->priv_size,
         .priv_defaults = vo->priv_defaults,
         .options = vo->options,
+        .legacy_opts = vo->legacy_opts,
+        .legacy_prefix = vo->legacy_prefix,
         .hidden = vo->encode || !strcmp(vo->name, "opengl-cb"),
         .p = vo,
     };

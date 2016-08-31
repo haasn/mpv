@@ -375,8 +375,8 @@ static int validate_window_opt(struct mp_log *log, const m_option_t *opt,
 
 const struct m_sub_options gl_video_conf = {
     .opts = (const m_option_t[]) {
-        OPT_FLAG("dumb-mode", dumb_mode, 0),
-        OPT_FLOATRANGE("gamma", gamma, 0, 0.1, 2.0),
+        OPT_FLAG("opengl-dumb-mode", dumb_mode, 0),
+        OPT_FLOATRANGE("opengl-gamma", gamma, 0, 0.1, 2.0),
         OPT_FLAG("gamma-auto", gamma_auto, 0),
         OPT_CHOICE_C("target-prim", target_prim, 0, mp_csp_prim_names),
         OPT_CHOICE_C("target-trc", target_trc, 0, mp_csp_trc_names),
@@ -388,7 +388,7 @@ const struct m_sub_options gl_video_conf = {
                     {"gamma",    TONE_MAPPING_GAMMA},
                     {"linear",   TONE_MAPPING_LINEAR})),
         OPT_FLOAT("tone-mapping-param", tone_mapping_param, 0),
-        OPT_FLAG("pbo", pbo, 0),
+        OPT_FLAG("opengl-pbo", pbo, 0),
         SCALER_OPTS("scale",  SCALER_SCALE),
         SCALER_OPTS("dscale", SCALER_DSCALE),
         SCALER_OPTS("cscale", SCALER_CSCALE),
@@ -400,7 +400,7 @@ const struct m_sub_options gl_video_conf = {
         OPT_FLAG("sigmoid-upscaling", sigmoid_upscaling, 0),
         OPT_FLOATRANGE("sigmoid-center", sigmoid_center, 0, 0.0, 1.0),
         OPT_FLOATRANGE("sigmoid-slope", sigmoid_slope, 0, 1.0, 20.0),
-        OPT_CHOICE("fbo-format", fbo_format, 0,
+        OPT_CHOICE("opengl-fbo-format", fbo_format, 0,
                    ({"rgb8",   GL_RGB8},
                     {"rgba8",  GL_RGBA8},
                     {"rgb10",  GL_RGB10},
@@ -427,7 +427,7 @@ const struct m_sub_options gl_video_conf = {
                     {"yes", ALPHA_YES},
                     {"blend", ALPHA_BLEND},
                     {"blend-tiles", ALPHA_BLEND_TILES})),
-        OPT_FLAG("rectangle-textures", use_rectangle, 0),
+        OPT_FLAG("opengl-rectangle-textures", use_rectangle, 0),
         OPT_COLOR("background", background, 0),
         OPT_FLAG("interpolation", interpolation, 0),
         OPT_FLOAT("interpolation-threshold", interpolation_threshold, 0),
@@ -435,7 +435,7 @@ const struct m_sub_options gl_video_conf = {
                    ({"no", BLEND_SUBS_NO},
                     {"yes", BLEND_SUBS_YES},
                     {"video", BLEND_SUBS_VIDEO})),
-        OPT_STRINGLIST("user-shaders", user_shaders, 0),
+        OPT_STRINGLIST("opengl-shaders", user_shaders, 0),
         OPT_FLAG("deband", deband, 0),
         OPT_SUBSTRUCT("deband", deband_opts, deband_conf, 0),
         OPT_FLOAT("sharpen", unsharp, 0),
@@ -447,10 +447,10 @@ const struct m_sub_options gl_video_conf = {
         OPT_REMOVED("indirect", "this is set automatically whenever sane"),
         OPT_REMOVED("srgb", "use target-prim=bt709:target-trc=srgb instead"),
         OPT_REMOVED("source-shader", "use :deband to enable debanding"),
-        OPT_REMOVED("prescale-luma", "use user shaders for prescaling"),
-        OPT_REMOVED("scale-shader", "use user-shaders instead"),
-        OPT_REMOVED("pre-shaders", "use user-shaders instead"),
-        OPT_REMOVED("post-shaders", "use user-shaders instead"),
+        OPT_REMOVED("prescale-luma", "use opengl-shaders for prescaling"),
+        OPT_REMOVED("scale-shader", "use opengl-shaders instead"),
+        OPT_REMOVED("pre-shaders", "use opengl-shaders instead"),
+        OPT_REMOVED("post-shaders", "use opengl-shaders instead"),
 
         OPT_REPLACED("lscale", "scale"),
         OPT_REPLACED("lscale-down", "scale-down"),
@@ -3371,7 +3371,7 @@ struct gl_video *gl_video_init(GL *gl, struct mp_log *log, struct mpv_global *g)
         .texture_16bit_depth = 16,
         .sc = gl_sc_create(gl, log),
     };
-    set_options(p, NULL);
+    gl_video_update_options(p);
     for (int n = 0; n < SCALER_COUNT; n++)
         p->scaler[n] = (struct scaler){.index = n};
     gl_video_set_debug(p, true);
@@ -3409,8 +3409,16 @@ static void set_options(struct gl_video *p, struct gl_video_opts *src)
 // Note: assumes all options are valid and verified by the option parser.
 void gl_video_set_options(struct gl_video *p, struct gl_video_opts *opts)
 {
-    set_options(p, opts);
+    // legacy
+}
+
+void gl_video_update_options(struct gl_video *p)
+{
+    // a bit expensive and dumb, but works for now
+    struct m_config_cache *cache = m_config_cache_alloc(p, p->log, p->global, &gl_video_conf);
+    set_options(p, cache->opts);
     reinit_from_options(p);
+    talloc_free(cache);
 }
 
 static void reinit_from_options(struct gl_video *p)

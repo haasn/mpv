@@ -63,7 +63,6 @@ struct gl_priv {
     void *original_opts;
 
     // Options
-    struct gl_video_opts *renderer_opts;
     int use_glFinish;
     int waitvsync;
     int use_gl_debug;
@@ -242,38 +241,12 @@ static void get_and_update_ambient_lighting(struct gl_priv *p)
     if (r == VO_TRUE) {
         gl_video_set_ambient_lux(p->renderer, lux);
     }
+    /*
     if (r != VO_TRUE && p->renderer_opts->gamma_auto) {
         MP_ERR(p, "gamma_auto option provided, but querying for ambient"
                   " lighting is not supported on this platform\n");
     }
-}
-
-static const struct m_option options[];
-
-static const struct m_sub_options opengl_conf = {
-    .opts = options,
-    .size = sizeof(struct gl_priv),
-};
-
-static bool reparse_cmdline(struct vo *vo, char *args)
-{
-    struct gl_priv *p = vo->priv;
-    int r = 0;
-
-    struct gl_priv *opts = p;
-
-    if (strcmp(args, "-") == 0) {
-        opts = p->original_opts;
-    } else {
-        r = m_config_parse_suboptions(vo->config, "opengl", args);
-    }
-
-    gl_video_set_options(p->renderer, opts->renderer_opts);
-    get_and_update_icc_profile(p);
-    gl_video_configure_queue(p->renderer, p->vo);
-    p->vo->want_redraw = true;
-
-    return r >= 0;
+    */
 }
 
 static int control(struct vo *vo, uint32_t request, void *data)
@@ -306,10 +279,12 @@ static int control(struct vo *vo, uint32_t request, void *data)
         struct mp_image *screen = gl_read_window_contents(p->gl);
         // set image parameters according to the display, if possible
         if (screen) {
+            /*
             screen->params.color = (struct mp_colorspace) {
                 .primaries = p->renderer_opts->target_prim,
                 .gamma = p->renderer_opts->target_trc,
             };
+            */
             if (p->glctx->flip_v)
                 mp_image_vflip(screen);
         }
@@ -319,9 +294,12 @@ static int control(struct vo *vo, uint32_t request, void *data)
     case VOCTRL_LOAD_HWDEC_API:
         request_hwdec_api(vo, data);
         return true;
-    case VOCTRL_SET_COMMAND_LINE: {
-        char *arg = data;
-        return reparse_cmdline(vo, arg);
+    case VOCTRL_UPDATE_RENDER_OPTS: {
+        gl_video_update_options(p->renderer);
+        get_and_update_icc_profile(p);
+        gl_video_configure_queue(p->renderer, p->vo);
+        p->vo->want_redraw = true;
+        return true;
     }
     case VOCTRL_RESET:
         gl_video_reset(p->renderer);
@@ -396,8 +374,10 @@ static int preinit(struct vo *vo)
 
     int vo_flags = 0;
 
+    /*
     if (p->renderer_opts->alpha_mode == 1)
         vo_flags |= VOFLAG_ALPHA;
+    */
 
     if (p->use_gl_debug)
         vo_flags |= VOFLAG_GL_DEBUG;
@@ -430,7 +410,6 @@ static int preinit(struct vo *vo)
     if (!p->renderer)
         goto err_out;
     gl_video_set_osd_source(p->renderer, vo->osd);
-    gl_video_set_options(p->renderer, p->renderer_opts);
     gl_video_configure_queue(p->renderer, vo);
 
     get_and_update_icc_profile(p);
@@ -447,8 +426,6 @@ static int preinit(struct vo *vo)
                                      vo->hwdec_devs, hwdec);
         gl_video_set_hwdec(p->renderer, p->hwdec);
     }
-
-    p->original_opts = m_sub_options_copy(p, &opengl_conf, p);
 
     return 0;
 
@@ -472,7 +449,6 @@ static const struct m_option options[] = {
     OPT_INTPAIR("check-pattern", opt_pattern, 0),
     OPT_INTRANGE("vsync-fences", opt_vsync_fences, 0, 0, NUM_VSYNC_FENCES),
 
-    OPT_SUBSTRUCT("", renderer_opts, gl_video_conf, 0),
     {0},
 };
 
@@ -493,6 +469,8 @@ const struct vo_driver video_out_opengl = {
     .uninit = uninit,
     .priv_size = sizeof(struct gl_priv),
     .options = options,
+    .legacy_opts = &gl_video_conf,
+    .legacy_prefix = "opengl",
 };
 
 const struct vo_driver video_out_opengl_hq = {
@@ -509,8 +487,7 @@ const struct vo_driver video_out_opengl_hq = {
     .wakeup = wakeup,
     .uninit = uninit,
     .priv_size = sizeof(struct gl_priv),
-    .priv_defaults = &(const struct gl_priv){
-        .renderer_opts = (struct gl_video_opts *)&gl_video_opts_hq_def,
-    },
     .options = options,
+    .legacy_opts = &gl_video_conf,
+    .legacy_prefix = "opengl",
 };

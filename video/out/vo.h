@@ -102,6 +102,7 @@ enum mp_voctrl {
     VOCTRL_SCREENSHOT_WIN,              // struct mp_image**
 
     VOCTRL_SET_COMMAND_LINE,            // char**
+    VOCTRL_UPDATE_RENDER_OPTS,
 
     VOCTRL_GET_ICC_PROFILE,             // bstr*
     VOCTRL_GET_AMBIENT_LUX,             // int*
@@ -296,6 +297,15 @@ struct vo_driver {
 
     // List of options to parse into priv struct (requires priv_size to be set)
     const struct m_option *options;
+
+    // If not NULL, this must exist as a top-level option with no prefix in
+    // MPOpts. It will be used to map legacy sub-options to newer global
+    // options.
+    const struct m_sub_options *legacy_opts;
+    // For use with legacy_opts. This assumes that some of the global options
+    // have prefixes, which must be stripped away to match with the legacy
+    // options.
+    const char *legacy_prefix;
 };
 
 struct vo {

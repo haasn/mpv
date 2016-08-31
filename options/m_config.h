@@ -42,6 +42,8 @@ struct m_config_option {
     bool is_set_from_cmdline : 1;   // Set by user from command line
     bool is_set_locally : 1;        // Has a backup entry
     bool warning_was_printed : 1;
+    bool is_legacy : 1;
+    bool is_legacy_prefixed : 1;
     int16_t shadow_offset;          // Offset into m_config_shadow.data
     int16_t group;                  // Index into m_config.groups
     const char *name;               // Full name (ie option-subopt)
@@ -311,6 +313,8 @@ struct m_config_cache *m_config_cache_alloc(void *ta_parent, struct mp_log *log,
 // Keep in mind that while the cache->opts pointer does not change, the option
 // data itself will (e.g. string options might be reallocated).
 bool m_config_cache_update(struct m_config_cache *cache);
+
+int m_config_find_group(struct m_config *config, const struct m_sub_options *group);
 
 struct m_config *mp_get_root_config(struct mpv_global *global);
 

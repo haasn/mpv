@@ -129,6 +129,9 @@ struct m_obj_desc {
     // Set by m_obj_list_find(). If the requested name is an old alias, this
     // is set to the old name (while the name field uses the new name).
     const char *replaced_name;
+    // Legacy sub-option redirection mechanism.
+    const struct m_sub_options *legacy_opts;
+    const char *legacy_prefix;
 };
 
 // Extra definition needed for \ref m_option_type_obj_settings_list options.
