@@ -59,6 +59,7 @@ struct gpu_priv {
 static void resize(struct gpu_priv *p)
 {
     struct vo *vo = p->vo;
+    struct ra_swchain *sw = p->ctx->swchain;
 
     MP_VERBOSE(vo, "Resize: %dx%d\n", vo->dwidth, vo->dheight);
 
@@ -67,6 +68,11 @@ static void resize(struct gpu_priv *p)
     vo_get_src_dst_rects(vo, &src, &dst, &osd);
 
     gl_video_resize(p->renderer, &src, &dst, &osd);
+
+    int fb_depth = sw->fns->color_depth ? sw->fns->color_depth(sw) : 0;
+    if (fb_depth)
+        MP_VERBOSE(p, "Reported display depth: %d\n", fb_depth);
+    gl_video_set_fb_depth(p->renderer, fb_depth);
 
     vo->want_redraw = true;
 }
@@ -77,10 +83,8 @@ static void draw_frame(struct vo *vo, struct vo_frame *frame)
     struct ra_swchain *sw = p->ctx->swchain;
 
     struct ra_tex *tex = sw->fns->start_frame(sw);
-    if (!tex) {
-        MP_ERR(vo, "Failed starting frame!\n");
+    if (!tex)
         return;
-    }
 
     struct fbodst dst = {
         .tex  = tex,
@@ -298,7 +302,6 @@ static int preinit(struct vo *vo)
         goto err_out;
     assert(p->ctx->ra);
     assert(p->ctx->swchain);
-    struct ra_swchain *sw = p->ctx->swchain;
 
     p->renderer = gl_video_init(p->ctx->ra, vo->log, vo->global);
     gl_video_set_osd_source(p->renderer, vo->osd);
@@ -313,11 +316,6 @@ static int preinit(struct vo *vo)
     p->hwdec = ra_hwdec_load(p->vo->log, p->ctx->ra, vo->global,
                              vo->hwdec_devs, vo->opts->gl_hwdec_interop);
     gl_video_set_hwdec(p->renderer, p->hwdec);
-
-    int fb_depth = sw->fns->color_depth ? sw->fns->color_depth(sw) : 0;
-    if (fb_depth)
-        MP_VERBOSE(p, "Reported display depth: %d\n", fb_depth);
-    gl_video_set_fb_depth(p->renderer, fb_depth);
 
     return 0;
 

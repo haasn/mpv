@@ -766,9 +766,13 @@ video_output_features = [
                  + 'plain-gl',
         'func': check_true,
     }, {
+        'name': '--vulkan',
+        'desc':  'Vulkan context support',
+        'func': check_cc(header_name='vulkan/vulkan.h', lib='vulkan'),
+    }, {
         'name': '--gpu',
         'desc': 'GPU-accelerated video output support',
-        'deps': 'gl',
+        'deps': 'gl || vulkan',
         'func': check_true,
         'req': True,
         'fmsg': "No GPU context found or enabled. Aborting. " +

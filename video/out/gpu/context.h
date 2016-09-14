@@ -73,7 +73,9 @@ struct ra_swchain_fns {
     void (*update_length)(struct ra_swchain *sw, int depth);
 
     // Called when rendering starts. Returns NULL on failure. This must be
-    // followed by submit_frame, to submit the rendered frame.
+    // followed by submit_frame, to submit the rendered frame. This function
+    // can also fail sporadically, and such errors should be ignored unless
+    // they persist.
     struct ra_tex *(*start_frame)(struct ra_swchain *sw);
 
     // Present the frame. Issued in lockstep with start_frame, with rendering
