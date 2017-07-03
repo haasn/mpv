@@ -269,6 +269,42 @@ bool parse_user_shader_pass(struct mp_log *log, struct bstr *body,
             continue;
         }
 
+        if (bstr_eatstart0(&line, "LOAD")) {
+            GLenum filter = GL_LINEAR;
+            if (bstr_eatstart0(&line, " NEAREST")) {
+                filter = GL_NEAREST;
+            } else if (bstr_eatstart0(&line, " LINEAR")) {
+                filter = GL_LINEAR;
+            }
+
+            int w, h, d, c, n = 0;
+            int num = bstr_sscanf(line, "%d %d %d %d%n", &w, &h, &d, &c, &n);
+            line = bstr_cut(line, n);
+
+            struct bstr path = bstr_strip(line);
+
+            // do some sanity checking
+            if (!path.len || num != 4 || c < 1 || c > 4 || w <= 0 || h <= 0
+                    || d <= 0 || w*h*d > 1e9)
+            {
+                mp_err(log, "Error while parsing LOAD!\n");
+                return false;
+            }
+
+            out->load_tex = (struct gl_user_tex) {
+                .path = path,
+                .width  = w,
+                .height = h,
+                .depth  = d,
+                .components = c,
+                .tex_filter = filter,
+                .tex_type = d > 1 ? GL_TEXTURE_3D
+                          : h > 1 ? GL_TEXTURE_2D
+                          : GL_TEXTURE_1D,
+            };
+            continue;
+        }
+
         // Unknown command type
         mp_err(log, "Unrecognized command '%.*s'!\n", BSTR_P(line));
         return false;

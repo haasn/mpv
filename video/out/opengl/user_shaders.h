@@ -55,6 +55,16 @@ struct szexp {
     } val;
 };
 
+struct gl_user_tex {
+    struct bstr path;
+    int width, height, depth;
+    int components;
+    GLenum tex_type;
+    GLenum tex_filter;
+    // for use by video.c
+    GLuint gl_tex;
+};
+
 struct gl_user_shader {
     struct bstr hook_tex[SHADER_MAX_HOOKS];
     struct bstr bind_tex[SHADER_MAX_BINDS];
@@ -65,6 +75,7 @@ struct gl_user_shader {
     struct szexp width[MAX_SZEXP_SIZE];
     struct szexp height[MAX_SZEXP_SIZE];
     struct szexp cond[MAX_SZEXP_SIZE];
+    struct gl_user_tex load_tex;
     int components;
 };
 

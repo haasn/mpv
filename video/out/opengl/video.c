@@ -150,7 +150,7 @@ struct tex_hook {
     void *priv; // this can be set to whatever the hook wants
     void (*hook)(struct gl_video *p, struct img_tex tex, // generates GLSL
                  struct gl_transform *trans, void *priv);
-    void (*free)(struct tex_hook *hook);
+    void (*free)(struct gl_video *p, struct tex_hook *hook);
     bool (*cond)(struct gl_video *p, struct img_tex tex, void *priv);
 };
 
@@ -479,7 +479,7 @@ static void gl_video_reset_hooks(struct gl_video *p)
 {
     for (int i = 0; i < p->tex_hook_num; i++) {
         if (p->tex_hooks[i].free)
-            p->tex_hooks[i].free(&p->tex_hooks[i]);
+            p->tex_hooks[i].free(p, &p->tex_hooks[i]);
     }
 
     p->tex_hook_num = 0;
@@ -1333,7 +1333,8 @@ found:
     p->components = img.components;
 }
 
-static void load_shader(struct gl_video *p, struct bstr body)
+static void load_shader(struct gl_video *p, struct bstr body,
+                        struct gl_user_tex *tex)
 {
     gl_sc_hadd_bstr(p->sc, body);
     gl_sc_uniform_f(p->sc, "random", (double)av_lfg_get(&p->lfg) / UINT32_MAX);
@@ -1351,6 +1352,9 @@ static void load_shader(struct gl_video *p, struct bstr body)
                                    p->texture_offset.t[0],
                                    p->src_rect.y0 * p->texture_offset.m[1][1] +
                                    p->texture_offset.t[1]});
+
+    if (tex->gl_tex)
+        gl_sc_uniform_tex(p->sc, "user_tex", tex->tex_type, tex->gl_tex);
 }
 
 // Semantic equality
@@ -1601,7 +1605,7 @@ static void pass_add_hook(struct gl_video *p, struct tex_hook hook)
         MP_ERR(p, "Too many hooks! Limit is %d.\n", SHADER_MAX_HOOKS);
 
         if (hook.free)
-            hook.free(&hook);
+            hook.free(p, &hook);
     }
 }
 
@@ -1695,7 +1699,7 @@ static void user_hook(struct gl_video *p, struct img_tex tex,
     pass_describe(p, "user shader: %.*s (%s)", BSTR_P(shader->desc),
                   plane_names[tex.type]);
 
-    load_shader(p, shader->pass_body);
+    load_shader(p, shader->pass_body, &shader->load_tex);
     GLSLF("color = hook();\n");
 
     // Make sure we at least create a legal FBO on failure, since it's better
@@ -1709,19 +1713,28 @@ static void user_hook(struct gl_video *p, struct img_tex tex,
     gl_transform_trans(shader->offset, trans);
 }
 
-static void user_hook_free(struct tex_hook *hook)
+static void user_hook_free(struct gl_video *p, struct tex_hook *hook)
 {
+    GL *gl = p->gl;
+
     talloc_free(hook->hook_tex);
     talloc_free(hook->save_tex);
     for (int i = 0; i < TEXUNIT_VIDEO_NUM; i++)
         talloc_free(hook->bind_tex[i]);
-    talloc_free(hook->priv);
+
+    struct gl_user_shader *shader = hook->priv;
+    if (shader->load_tex.gl_tex)
+        gl->DeleteTextures(1, &shader->load_tex.gl_tex);
+
+    talloc_free(shader);
 }
 
 static void pass_hook_user_shaders(struct gl_video *p, char **shaders)
 {
     if (!shaders)
         return;
+
+    GL *gl = p->gl;
 
     for (int n = 0; shaders[n] != NULL; n++) {
         struct bstr file = load_cached_file(p, shaders[n]);
@@ -1733,6 +1746,56 @@ static void pass_hook_user_shaders(struct gl_video *p, char **shaders)
                 .free = user_hook_free,
                 .cond = user_hook_cond,
             };
+
+            struct gl_user_tex *tex = &out.load_tex;
+            if (tex->path.len) {
+                char *path = bstrto0(p, tex->path);
+                struct bstr data = load_cached_file(p, path);
+                talloc_free(path);
+                size_t expected_size = tex->width * tex->height * tex->depth *
+                                       tex->components * 4;
+
+                if (data.len != expected_size) {
+                    MP_ERR(p, "User texture size mismatch!\n");
+                    break;
+                }
+
+                GLint iformat;
+                GLenum format;
+                switch (tex->components) {
+                case 1: iformat = GL_R32F;    format = GL_RED;  break;
+                case 2: iformat = GL_RG32F;   format = GL_RG;   break;
+                case 3: iformat = GL_RGB32F;  format = GL_RGB;  break;
+                case 4: iformat = GL_RGBA32F; format = GL_RGBA; break;
+                default: return; // should never happen
+                }
+
+                GLenum type = tex->tex_type;
+                gl->GenTextures(1, &tex->gl_tex);
+                gl->BindTexture(type, tex->gl_tex);
+                gl->PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+                if (type == GL_TEXTURE_3D) {
+                    gl->TexImage3D(type, 0, iformat,tex->width, tex->height,
+                                   tex->depth, 0, format, GL_FLOAT, data.start);
+                    gl->TexParameteri(type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    gl->TexParameteri(type, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                    gl->TexParameteri(type, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+                } else if (type == GL_TEXTURE_2D) {
+                    gl->TexImage2D(type, 0, iformat,tex->width, tex->height,
+                                   0, format, GL_FLOAT, data.start);
+                    gl->TexParameteri(type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    gl->TexParameteri(type, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                } else {
+                    gl->TexImage1D(type, 0, iformat,tex->width, 0, format,
+                                   GL_FLOAT, data.start);
+                    gl->TexParameteri(type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                }
+
+                gl->TexParameteri(type, GL_TEXTURE_MIN_FILTER, tex->tex_filter);
+                gl->TexParameteri(type, GL_TEXTURE_MAG_FILTER, tex->tex_filter);
+                gl->BindTexture(type, 0);
+            }
 
             for (int i = 0; i < SHADER_MAX_HOOKS; i++) {
                 hook.hook_tex = bstrdup0(p, out.hook_tex[i]);
