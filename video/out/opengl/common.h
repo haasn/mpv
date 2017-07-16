@@ -191,6 +191,7 @@ struct GL {
     GLsync (GLAPIENTRY *FenceSync)(GLenum, GLbitfield);
     GLenum (GLAPIENTRY *ClientWaitSync)(GLsync, GLbitfield, GLuint64);
     void (GLAPIENTRY *DeleteSync)(GLsync sync);
+    GLboolean (GLAPIENTRY *IsSync)(GLsync sync);
 
     void (GLAPIENTRY *BufferStorage)(GLenum, intptr_t, const GLvoid *, GLenum);
 

@@ -273,6 +273,7 @@ static const struct gl_functions gl_functions[] = {
             DEF_FN(FenceSync),
             DEF_FN(ClientWaitSync),
             DEF_FN(DeleteSync),
+            DEF_FN(IsSync),
             {0}
         },
     },

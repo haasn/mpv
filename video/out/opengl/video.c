@@ -99,6 +99,7 @@ struct video_image {
     struct texplane planes[4];
     struct mp_image *mpi;       // original input image
     uint64_t id;                // unique ID identifying mpi contents
+    GLsync fence;               // GL fence guarding usage of this video_image
     bool hwdec_mapped;
 };
 
@@ -172,6 +173,13 @@ struct pass_info {
     struct mp_pass_perf perf;
 };
 
+enum pass_type {
+    PASS_FRESH = 0,
+    PASS_REDRAW,
+    PASS_UPLOAD,
+    PASS_TYPE_COUNT,
+};
+
 #define PASS_INFO_MAX (SHADER_MAX_HOOKS + 32)
 
 struct dr_buffer {
@@ -218,7 +226,9 @@ struct gl_video {
     char color_swizzle[5];
     bool use_integer_conversion;
 
-    struct video_image image;
+    struct video_image *images;
+    int num_images;
+    int last_id;
 
     struct dr_buffer *dr_buffers;
     int num_dr_buffers;
@@ -261,8 +271,7 @@ struct gl_video {
     float user_gamma;
 
     // pass info / metrics
-    struct pass_info pass_fresh[PASS_INFO_MAX];
-    struct pass_info pass_redraw[PASS_INFO_MAX];
+    struct pass_info passinfo[PASS_TYPE_COUNT][PASS_INFO_MAX];
     struct pass_info *pass;
     int pass_idx;
     struct gl_timer *upload_timer;
@@ -432,7 +441,7 @@ const struct m_sub_options gl_video_conf = {
 static void uninit_rendering(struct gl_video *p);
 static void uninit_scaler(struct gl_video *p, struct scaler *scaler);
 static void check_gl_features(struct gl_video *p);
-static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t id);
+static struct video_image *pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t id);
 static const char *handle_scaler_opt(const char *name, bool tscale);
 static void reinit_from_options(struct gl_video *p);
 static void get_scale_factors(struct gl_video *p, bool transpose_rot, double xy[2]);
@@ -818,10 +827,63 @@ static int find_comp(struct gl_imgfmt_desc *desc, int component)
     return -1;
 }
 
-static void init_video(struct gl_video *p)
+static void init_video_image(struct gl_video *p, struct video_image *vimg,
+                             struct mp_image *mpi)
 {
     GL *gl = p->gl;
+    *vimg = (struct video_image){0};
 
+    if (p->hwdec_active)
+        return;
+
+    GLenum gl_target =
+        p->opts.use_rectangle ? GL_TEXTURE_RECTANGLE : GL_TEXTURE_2D;
+
+    struct mp_image layout = {0};
+    mp_image_set_params(&layout, &mpi->params);
+
+    // FIXME: compute gl_format from mpi->params?
+    for (int n = 0; n < p->plane_count; n++) {
+        struct texplane *plane = &vimg->planes[n];
+        const struct gl_format *format = p->gl_format.planes[n];
+
+        plane->gl_target = gl_target;
+        plane->gl_format = format->format;
+        plane->gl_internal_format = format->internal_format;
+        plane->gl_type = format->type;
+
+        p->use_integer_conversion |= gl_is_integer_format(plane->gl_format);
+
+        plane->w = mp_image_plane_w(&layout, n);
+        plane->h = mp_image_plane_h(&layout, n);
+        plane->tex_w = plane->w + p->opts.tex_pad_x;
+        plane->tex_h = plane->h + p->opts.tex_pad_y;
+
+        gl->GenTextures(1, &plane->gl_texture);
+        gl->BindTexture(gl_target, plane->gl_texture);
+
+        gl->TexImage2D(gl_target, 0, plane->gl_internal_format,
+                       plane->tex_w, plane->tex_h, 0,
+                       plane->gl_format, plane->gl_type, NULL);
+
+        int filter = gl_is_integer_format(plane->gl_format)
+                     ? GL_NEAREST : GL_LINEAR;
+        gl->TexParameteri(gl_target, GL_TEXTURE_MIN_FILTER, filter);
+        gl->TexParameteri(gl_target, GL_TEXTURE_MAG_FILTER, filter);
+        gl->TexParameteri(gl_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gl->TexParameteri(gl_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        gl->BindTexture(gl_target, 0);
+
+        MP_VERBOSE(p, "Texture for plane %d: %dx%d\n", n,
+                   plane->tex_w, plane->tex_h);
+    }
+
+    debug_check_gl(p, "after video texture creation");
+}
+
+static void init_video(struct gl_video *p)
+{
     p->hwdec_active = false;
     p->use_integer_conversion = false;
 
@@ -876,63 +938,15 @@ static void init_video(struct gl_video *p)
 
     av_lfg_init(&p->lfg, 1);
 
-    debug_check_gl(p, "before video texture creation");
-
-    if (!p->hwdec_active) {
-        struct video_image *vimg = &p->image;
-
-        GLenum gl_target =
-            p->opts.use_rectangle ? GL_TEXTURE_RECTANGLE : GL_TEXTURE_2D;
-
-        struct mp_image layout = {0};
-        mp_image_set_params(&layout, &p->image_params);
-
-        for (int n = 0; n < p->plane_count; n++) {
-            struct texplane *plane = &vimg->planes[n];
-            const struct gl_format *format = p->gl_format.planes[n];
-
-            plane->gl_target = gl_target;
-            plane->gl_format = format->format;
-            plane->gl_internal_format = format->internal_format;
-            plane->gl_type = format->type;
-
-            p->use_integer_conversion |= gl_is_integer_format(plane->gl_format);
-
-            plane->w = mp_image_plane_w(&layout, n);
-            plane->h = mp_image_plane_h(&layout, n);
-            plane->tex_w = plane->w + p->opts.tex_pad_x;
-            plane->tex_h = plane->h + p->opts.tex_pad_y;
-
-            gl->GenTextures(1, &plane->gl_texture);
-            gl->BindTexture(gl_target, plane->gl_texture);
-
-            gl->TexImage2D(gl_target, 0, plane->gl_internal_format,
-                           plane->tex_w, plane->tex_h, 0,
-                           plane->gl_format, plane->gl_type, NULL);
-
-            int filter = gl_is_integer_format(plane->gl_format)
-                         ? GL_NEAREST : GL_LINEAR;
-            gl->TexParameteri(gl_target, GL_TEXTURE_MIN_FILTER, filter);
-            gl->TexParameteri(gl_target, GL_TEXTURE_MAG_FILTER, filter);
-            gl->TexParameteri(gl_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            gl->TexParameteri(gl_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-            gl->BindTexture(gl_target, 0);
-
-            MP_VERBOSE(p, "Texture for plane %d: %dx%d\n", n,
-                       plane->tex_w, plane->tex_h);
-        }
-    }
-
-    debug_check_gl(p, "after video texture creation");
+    debug_check_gl(p, "after video initialization");
 
     gl_video_setup_hooks(p);
 }
 
-// Release any texture mappings associated with the current frame.
-static void unmap_current_image(struct gl_video *p)
+static void unref_video_image(struct gl_video *p, struct video_image *vimg)
 {
-    struct video_image *vimg = &p->image;
+    if (!vimg->id)
+        return;
 
     if (vimg->hwdec_mapped) {
         assert(p->hwdec_active);
@@ -940,15 +954,40 @@ static void unmap_current_image(struct gl_video *p)
             p->hwdec->driver->unmap(p->hwdec);
         memset(vimg->planes, 0, sizeof(vimg->planes));
         vimg->hwdec_mapped = false;
-        vimg->id = 0; // needs to be mapped again
     }
+
+    mp_image_unrefp(&vimg->mpi);
+    vimg->id = 0;
 }
 
-static void unref_current_image(struct gl_video *p)
+// Garbage collect all images that were either in flight and are now no longer
+// in use by the GPU, or which were never used by us to begin with
+static void garbage_collect_images(struct gl_video *p, uint64_t current_id)
 {
-    unmap_current_image(p);
-    mp_image_unrefp(&p->image.mpi);
-    p->image.id = 0;
+    GL *gl = p->gl;
+
+    for (int i = 0; i < p->num_images; i++) {
+        struct video_image *vimg = &p->images[i];
+        if (!vimg->id || vimg->id >= current_id)
+            continue;
+
+        // If there is a fence object on this vimg, we need to make sure
+        // it's not still in use before we unref it
+        bool in_use = false;
+        if (gl->IsSync && gl->IsSync(vimg->fence)) {
+            GLenum res = gl->ClientWaitSync(vimg->fence, 0, 0); // timeout = 0ns
+            if (res == GL_TIMEOUT_EXPIRED) {
+                in_use = true;
+            } else {
+                gl->DeleteSync(vimg->fence);
+            }
+        }
+
+        if (!in_use) {
+            MP_DBG(p, "Garbage collected image %d\n", i);
+            unref_video_image(p, vimg);
+        }
+    }
 }
 
 // If overlay mode is used, make sure to remove the overlay.
@@ -966,18 +1005,21 @@ static void uninit_video(struct gl_video *p)
 
     uninit_rendering(p);
 
-    struct video_image *vimg = &p->image;
-
     unmap_overlay(p);
-    unref_current_image(p);
 
-    for (int n = 0; n < p->plane_count; n++) {
-        struct texplane *plane = &vimg->planes[n];
+    for (int i = 0; i < p->num_images; i++) {
+        struct video_image *vimg = &p->images[i];
+        unref_video_image(p, vimg);
 
-        gl->DeleteTextures(1, &plane->gl_texture);
-        gl_pbo_upload_uninit(&plane->pbo);
+        for (int n = 0; n < p->plane_count; n++) {
+            struct texplane *plane = &vimg->planes[n];
+
+            gl->DeleteTextures(1, &plane->gl_texture);
+            gl_pbo_upload_uninit(&plane->pbo);
+        }
+
+        *vimg = (struct video_image){0};
     }
-    *vimg = (struct video_image){0};
 
     // Invalidate image_params to ensure that gl_video_config() will call
     // init_video() on uninitialized gl_video.
@@ -1016,9 +1058,10 @@ static void pass_describe(struct gl_video *p, const char *textf, ...)
     va_end(ap);
 }
 
-static void pass_info_reset(struct gl_video *p, bool is_redraw)
+static void pass_info_reset(struct gl_video *p, enum pass_type type)
 {
-    p->pass = is_redraw ? p->pass_redraw : p->pass_fresh;
+    assert(type >= 0 && type < PASS_TYPE_COUNT);
+    p->pass = p->passinfo[type];
     p->pass_idx = 0;
 
     for (int i = 0; i < PASS_INFO_MAX; i++) {
@@ -1830,11 +1873,11 @@ static void gl_video_setup_hooks(struct gl_video *p)
 }
 
 // sample from video textures, set "color" variable to yuv value
-static void pass_read_video(struct gl_video *p)
+static void pass_read_video(struct gl_video *p, struct video_image *vimg)
 {
     struct img_tex tex[4];
     struct gl_transform offsets[4];
-    pass_get_img_tex(p, &p->image, tex, offsets);
+    pass_get_img_tex(p, vimg, tex, offsets);
 
     // To keep the code as simple as possibly, we currently run all shader
     // stages even if they would be unnecessary (e.g. no hooks for a texture).
@@ -2460,13 +2503,15 @@ static float chroma_realign(int size, int pixel)
 }
 
 // Minimal rendering code path, for GLES or OpenGL 2.1 without proper FBOs.
-static void pass_render_frame_dumb(struct gl_video *p, int fbo)
+static void pass_render_frame_dumb(struct gl_video *p, struct video_image *vimg,
+                                   int fbo)
 {
+    assert(vimg);
     p->gl->BindFramebuffer(GL_FRAMEBUFFER, fbo);
 
     struct img_tex tex[4];
     struct gl_transform off[4];
-    pass_get_img_tex(p, &p->image, tex, off);
+    pass_get_img_tex(p, vimg, tex, off);
 
     struct gl_transform transform;
     compute_src_transform(p, &transform);
@@ -2499,7 +2544,7 @@ static void pass_render_frame_dumb(struct gl_video *p, int fbo)
 
 // The main rendering function, takes care of everything up to and including
 // upscaling. p->image is rendered.
-static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t id)
+static void pass_render_frame(struct gl_video *p, struct video_image *vimg)
 {
     // initialize the texture parameters and temporary variables
     p->texture_w = p->image_params.w;
@@ -2510,24 +2555,20 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
     p->hook_fbo_num = 0;
     p->use_linear = false;
 
-    // try uploading the frame
-    if (!pass_upload_image(p, mpi, id))
-        return false;
-
     if (p->image_params.rotate % 180 == 90)
         MPSWAP(int, p->texture_w, p->texture_h);
 
     if (p->dumb_mode)
-        return true;
+        return;
 
     p->use_linear = p->opts.linear_scaling || p->opts.sigmoid_upscaling;
-    pass_read_video(p);
+    pass_read_video(p, vimg);
     pass_opt_hook_point(p, "NATIVE", &p->texture_offset);
     pass_convert_yuv(p);
     pass_opt_hook_point(p, "MAINPRESUB", &p->texture_offset);
 
     // For subtitles
-    double vpts = p->image.mpi->pts;
+    double vpts = vimg->mpi->pts;
     if (vpts == MP_NOPTS_VALUE)
         vpts = p->osd_pts;
 
@@ -2577,14 +2618,13 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
     }
 
     pass_opt_hook_point(p, "SCALED", NULL);
-
-    return true;
 }
 
-static void pass_draw_to_screen(struct gl_video *p, int fbo)
+static void pass_draw_to_screen(struct gl_video *p, struct video_image *vimg,
+                                int fbo)
 {
     if (p->dumb_mode)
-        pass_render_frame_dumb(p, fbo);
+        pass_render_frame_dumb(p, vimg, fbo);
 
     // Adjust the overall gamma before drawing to screen
     if (p->user_gamma != 1) {
@@ -2638,12 +2678,14 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
     if (p->surfaces[p->surface_now].id == 0) {
         is_new = true;
         pass_info_reset(p, false);
-        if (!pass_render_frame(p, t->current, t->frame_id))
+        struct video_image *vimg = pass_upload_image(p, t->current, t->frame_id);
+        if (!vimg)
             return;
+        pass_render_frame(p, vimg);
         finish_pass_fbo(p, &p->surfaces[p->surface_now].fbotex,
                         vp_w, vp_h, FBOTEX_FUZZY);
-        p->surfaces[p->surface_now].id = p->image.id;
-        p->surfaces[p->surface_now].pts = p->image.mpi->pts;
+        p->surfaces[p->surface_now].id = t->frame_id;
+        p->surfaces[p->surface_now].pts = t->current->pts;
         p->surface_idx = p->surface_now;
     }
 
@@ -2688,7 +2730,7 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
     // it only barely matters at the very beginning of playback, and this way
     // makes the code much more linear.
     int surface_dst = fbosurface_wrap(p->surface_idx + 1);
-    for (int i = 0; i < t->num_frames; i++) {
+    for (int i = 0; i < MPMIN(t->num_frames, ceil(radius + 1)); i++) {
         // Avoid overwriting data we might still need
         if (surface_dst == surface_bse - 1)
             break;
@@ -2701,8 +2743,11 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
         if (f_id > p->surfaces[p->surface_idx].id) {
             is_new = true;
             pass_info_reset(p, false);
-            if (!pass_render_frame(p, f, f_id))
+            // ensure the frame is uploaded
+            struct video_image *vimg = pass_upload_image(p, f, f_id);
+            if (!vimg)
                 return;
+            pass_render_frame(p, vimg);
             finish_pass_fbo(p, &p->surfaces[surface_dst].fbotex,
                             vp_w, vp_h, FBOTEX_FUZZY);
             p->surfaces[surface_dst].id = f_id;
@@ -2796,7 +2841,7 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
                t->ideal_frame_duration, t->vsync_interval, mix);
         p->is_interpolated = true;
     }
-    pass_draw_to_screen(p, fbo);
+    pass_draw_to_screen(p, NULL, fbo); // no vimg needed, that's just for dumb_mode
 
     p->frames_drawn += 1;
 }
@@ -2848,7 +2893,7 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
             gl->Disable(GL_SCISSOR_TEST);
         }
 
-        if (frame->frame_id != p->image.id || !frame->current)
+        if (frame->frame_id != p->last_id || !frame->current)
             p->hwdec->driver->overlay_frame(p->hwdec, frame->current);
 
         if (frame->current)
@@ -2857,6 +2902,8 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
         // Disable GL rendering
         has_frame = false;
     }
+
+    garbage_collect_images(p, frame->frame_id);
 
     if (has_frame) {
         gl_sc_set_vao(p->sc, &p->vao);
@@ -2872,7 +2919,7 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
         if (interpolate) {
             gl_video_interpolate_frame(p, frame, fbo);
         } else {
-            bool is_new = frame->frame_id != p->image.id;
+            bool is_new = frame->frame_id != p->last_id;
 
             // Redrawing a frame might update subtitles.
             if (frame->still && p->opts.blend_subs)
@@ -2880,10 +2927,14 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
 
             if (is_new || !p->output_fbo_valid) {
                 p->output_fbo_valid = false;
+                pass_info_reset(p, PASS_FRESH);
 
-                pass_info_reset(p, false);
-                if (!pass_render_frame(p, frame->current, frame->frame_id))
+                struct video_image *vimg;
+                vimg = pass_upload_image(p, frame->current, frame->frame_id);
+                if (!vimg)
                     goto done;
+
+                pass_render_frame(p, vimg);
 
                 // For the non-interpolation case, we draw to a single "cache"
                 // FBO to speed up subsequent re-draws (if any exist)
@@ -2897,12 +2948,12 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
                     dest_fbo = p->output_fbo.fbo;
                     p->output_fbo_valid = true;
                 }
-                pass_draw_to_screen(p, dest_fbo);
+                pass_draw_to_screen(p, vimg, dest_fbo);
             }
 
             // "output fbo valid" and "output fbo needed" are equivalent
             if (p->output_fbo_valid) {
-                pass_info_reset(p, true);
+                pass_info_reset(p, PASS_REDRAW);
                 pass_describe(p, "redraw cached frame");
                 gl->BindFramebuffer(GL_READ_FRAMEBUFFER, p->output_fbo.fbo);
                 gl->BindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
@@ -2921,11 +2972,19 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame, int fbo)
                 pass_record(p, gl_timer_measure(p->blit_timer));
             }
         }
+
+        pass_report_performance(p);
+    }
+
+    // Opportunistically upload all other images ahead of time. We don't care
+    // if this fails or not
+    for (int i = 0; i < frame->num_frames; i++) {
+        pass_info_reset(p, PASS_UPLOAD);
+        pass_upload_image(p, frame->frames[i], frame->frame_id + i);
+        pass_report_performance(p);
     }
 
 done:
-
-    unmap_current_image(p);
 
     debug_check_gl(p, "after video rendering");
 
@@ -2962,8 +3021,8 @@ done:
         gl->Flush();
     }
 
+    p->last_id = frame->frame_id;
     p->frames_rendered++;
-    pass_report_performance(p);
 }
 
 // vp_w/vp_h is the implicit size of the target framebuffer.
@@ -3001,8 +3060,8 @@ static void frame_perf_data(struct pass_info pass[], struct mp_frame_perf *out)
 void gl_video_perfdata(struct gl_video *p, struct voctrl_performance_data *out)
 {
     *out = (struct voctrl_performance_data){0};
-    frame_perf_data(p->pass_fresh,  &out->fresh);
-    frame_perf_data(p->pass_redraw, &out->redraw);
+    frame_perf_data(p->passinfo[PASS_FRESH],  &out->fresh);
+    frame_perf_data(p->passinfo[PASS_REDRAW], &out->redraw);
 }
 
 // This assumes nv12, with textures set to GL_NEAREST filtering.
@@ -3049,16 +3108,32 @@ static void reinterleave_vdpau(struct gl_video *p, struct gl_hwdec_frame *frame)
     *frame = res;
 }
 
-// Returns false on failure.
-static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t id)
+// Returns NULL on failure.
+static struct video_image *pass_upload_image(struct gl_video *p,
+                                             struct mp_image *mpi,
+                                             uint64_t id)
 {
     GL *gl = p->gl;
-    struct video_image *vimg = &p->image;
 
-    if (vimg->id == id)
-        return true;
+    // Scan through the current images. If we already found this ID, we can
+    // directly return it. Otherwise, we just take some free vimg ID and upload
+    // to that instead.
+    struct video_image *vimg = NULL;
+    for (int i = 0; i < p->num_images; i++) {
+        if (p->images[i].id == id)
+            return &p->images[i];
+        if (!p->images[i].id)
+            vimg = &p->images[i];
+    }
 
-    unref_current_image(p);
+    if (!vimg) {
+        MP_TARRAY_GROW(p, p->images, p->num_images);
+        vimg = &p->images[p->num_images++];
+        MP_VERBOSE(p, "Ran out of images, growing to size %d\n", p->num_images);
+        init_video_image(p, vimg, mpi);
+    }
+
+    // FIXME: also delete & init_video_image if the params don't match!
 
     mpi = mp_image_new_ref(mpi);
     if (!mpi)
@@ -3101,7 +3176,7 @@ static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t
             MP_FATAL(p, "Mapping hardware decoded surface failed.\n");
             goto error;
         }
-        return true;
+        return vimg;
     }
 
     // Software decoding
@@ -3135,6 +3210,7 @@ static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t
                           (void *)offset, mpi->stride[n],
                           0, 0, plane->w, plane->h);
             gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+            vimg->fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         } else {
             MP_WARN(p, "non-DR path!\n");
             gl_pbo_upload_tex(&plane->pbo, gl, p->opts.pbo, plane->gl_target,
@@ -3147,12 +3223,12 @@ static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t
     gl_timer_stop(gl);
     pass_record(p, gl_timer_measure(p->upload_timer));
 
-    return true;
+    return vimg;
 
 error:
-    unref_current_image(p);
+    unref_video_image(p, vimg);
     p->broken_frame = true;
-    return false;
+    return NULL;
 }
 
 static bool test_fbo(struct gl_video *p, GLint format)
@@ -3364,9 +3440,9 @@ void gl_video_uninit(struct gl_video *p)
 
     gl_timer_free(p->upload_timer);
     gl_timer_free(p->blit_timer);
-    for (int i = 0; i < PASS_INFO_MAX; i++) {
-        talloc_free(p->pass_fresh[i].desc.start);
-        talloc_free(p->pass_redraw[i].desc.start);
+    for (int t = 0; t < PASS_TYPE_COUNT; t++) {
+        for (int i = 0; i < PASS_INFO_MAX; i++)
+            talloc_free(p->passinfo[t][i].desc.start);
     }
 
     mpgl_osd_destroy(p->osd);
@@ -3444,7 +3520,7 @@ bool gl_video_check_format(struct gl_video *p, int mp_format)
 void gl_video_config(struct gl_video *p, struct mp_image_params *params)
 {
     unmap_overlay(p);
-    unref_current_image(p);
+    //unref_video_image_lazy(p, &p->image);
 
     if (!mp_image_params_equal(&p->real_image_params, params)) {
         uninit_video(p);
@@ -3481,7 +3557,7 @@ struct gl_video *gl_video_init(GL *gl, struct mp_log *log, struct mpv_global *g)
         .opts_cache = m_config_cache_alloc(p, g, &gl_video_conf),
     };
     // make sure this variable is initialized to *something*
-    p->pass = p->pass_fresh;
+    p->pass = p->passinfo[0];
     struct gl_video_opts *opts = p->opts_cache->opts;
     p->cms = gl_lcms_init(p, log, g, opts->icc_opts),
     p->opts = *opts;
@@ -3544,7 +3620,7 @@ static void reinit_from_options(struct gl_video *p)
 
 void gl_video_configure_queue(struct gl_video *p, struct vo *vo)
 {
-    int queue_size = 1;
+    int queue_size = 3;
 
     // Figure out an adequate size for the interpolation queue. The larger
     // the radius, the earlier we need to queue frames.
@@ -3658,7 +3734,7 @@ void gl_video_set_ambient_lux(struct gl_video *p, int lux)
 void gl_video_set_hwdec(struct gl_video *p, struct gl_hwdec *hwdec)
 {
     p->hwdec = hwdec;
-    unref_current_image(p);
+    //unref_video_image_lazy(p, &p->image);
 }
 
 void *gl_video_dr_alloc_buffer(struct gl_video *p, size_t size)
