@@ -126,6 +126,7 @@ struct GL {
     void (GLAPIENTRY *BindBufferBase)(GLenum, GLuint, GLuint);
     GLvoid * (GLAPIENTRY *MapBufferRange)(GLenum, GLintptr, GLsizeiptr,
                                           GLbitfield);
+    void (GLAPIENTRY *FlushMappedBufferRange)(GLenum, GLintptr, GLsizeiptr);
     GLboolean (GLAPIENTRY *UnmapBuffer)(GLenum);
     void (GLAPIENTRY *BufferData)(GLenum, intptr_t, const GLvoid *, GLenum);
     void (GLAPIENTRY *ActiveTexture)(GLenum);
@@ -190,6 +191,8 @@ struct GL {
     GLsync (GLAPIENTRY *FenceSync)(GLenum, GLbitfield);
     GLenum (GLAPIENTRY *ClientWaitSync)(GLsync, GLbitfield, GLuint64);
     void (GLAPIENTRY *DeleteSync)(GLsync sync);
+    GLboolean (GLAPIENTRY *IsSync)(GLsync sync);
+    void (GLAPIENTRY *BufferStorage)(GLenum, intptr_t, const GLvoid *, GLenum);
 
     void (GLAPIENTRY *GenQueries)(GLsizei, GLuint *);
     void (GLAPIENTRY *DeleteQueries)(GLsizei, const GLuint *);

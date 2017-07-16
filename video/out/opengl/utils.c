@@ -1313,6 +1313,8 @@ void gl_pbo_upload_tex(struct gl_pbo_upload *pbo, GL *gl, bool use_pbo,
     if (!use_pbo || !gl->MapBufferRange)
         goto no_pbo;
 
+    bool use_persistent = gl->BufferStorage && gl->FenceSync;
+
     // We align the buffer size to 4096 to avoid possible subregion
     // dependencies. This is not a strict requirement (the spec requires no
     // alignment), but a good precaution for performance reasons
@@ -1328,36 +1330,66 @@ void gl_pbo_upload_tex(struct gl_pbo_upload *pbo, GL *gl, bool use_pbo,
         pbo->buffer_size = buffer_size;
         gl->GenBuffers(1, &pbo->buffer);
         gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->buffer);
-        // Magic time: Because we memcpy once from RAM to the buffer, and then
-        // the GPU needs to read from this anyway, we actually *don't* want
-        // this buffer to be allocated in RAM. If we allocate it in VRAM
-        // instead, we can reduce this to a single copy: from RAM into VRAM.
-        // Unfortunately, drivers e.g. nvidia will think GL_STREAM_DRAW is best
-        // allocated on host memory instead of device memory, so we lie about
-        // the usage to fool the driver into giving us a buffer in VRAM instead
-        // of RAM, which can be significantly faster for our use case.
-        // Seriously, fuck OpenGL.
-        gl->BufferData(GL_PIXEL_UNPACK_BUFFER, NUM_PBO_BUFFERS * buffer_size,
-                       NULL, GL_STREAM_COPY);
+        size_t total_size = NUM_PBO_BUFFERS * buffer_size;
+
+        if (use_persistent) {
+            gl->BufferStorage(GL_PIXEL_UNPACK_BUFFER, total_size, NULL,
+                              GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
+
+            pbo->data = gl->MapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, total_size,
+                                           GL_MAP_WRITE_BIT |
+                                           GL_MAP_PERSISTENT_BIT |
+                                           GL_MAP_INVALIDATE_BUFFER_BIT |
+                                           GL_MAP_FLUSH_EXPLICIT_BIT);
+        } else {
+            // Note: GL_STREAM_DRAW will probably allocate on system RAM,
+            // which may or may not be faster than directly copying to device
+            // memory. Depends on the machine, really. For NUMA systems in
+            // particular, it can completely blow up, but for the rest of
+            // the world, it's probably better..
+            gl->BufferData(GL_PIXEL_UNPACK_BUFFER, total_size, NULL, GL_STREAM_DRAW);
+        }
     }
 
-    size_t offset = buffer_size * pbo->index;
+    gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->buffer);
+
+    intptr_t offset = buffer_size * pbo->index;
+    GLsync *fence = &pbo->fences[pbo->index];
     pbo->index = (pbo->index + 1) % NUM_PBO_BUFFERS;
 
-    gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->buffer);
-    void *data = gl->MapBufferRange(GL_PIXEL_UNPACK_BUFFER, offset, needed_size,
-                                    GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
-    if (!data)
-        goto no_pbo;
+    void *data;
+    if (use_persistent) {
+        // Buffer is already mapped, but we need to make sure it's usable
+        if (!pbo->data)
+            goto no_pbo;
+        data = (char *)pbo->data + offset;
+        if (gl->IsSync(*fence)) {
+            GLenum res = gl->ClientWaitSync(*fence, 0, 10000000); // 10 ms
+            gl->DeleteSync(*fence);
+            // PBO not ready for some reason -> fallback (slow but correct)
+            if (res == GL_TIMEOUT_EXPIRED)
+                goto no_pbo;
+        }
+    } else {
+        // Buffer needs to be mapped
+        data = gl->MapBufferRange(GL_PIXEL_UNPACK_BUFFER, offset, needed_size,
+                                  GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+        if (!data)
+            goto no_pbo;
+    }
 
     memcpy_pic(data, dataptr, pix_stride * w,  h, pix_stride * w, stride);
 
-    if (!gl->UnmapBuffer(GL_PIXEL_UNPACK_BUFFER)) {
-        gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-        goto no_pbo;
+    if (use_persistent) {
+        gl->FlushMappedBufferRange(GL_PIXEL_UNPACK_BUFFER, offset, needed_size);
+    } else {
+        gl->UnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
     }
 
     gl_upload_tex(gl, target, format, type, (void *)offset, pix_stride * w, x, y, w, h);
+
+    if (use_persistent)
+        *fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 
     gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
@@ -1369,8 +1401,19 @@ no_pbo:
 
 void gl_pbo_upload_uninit(struct gl_pbo_upload *pbo)
 {
-    if (pbo->gl)
-        pbo->gl->DeleteBuffers(1, &pbo->buffer);
+    GL *gl = pbo->gl;
+
+    if (gl && pbo->buffer) {
+        for (int n = 0; n < NUM_PBO_BUFFERS; n++)
+            gl->DeleteSync(pbo->fences[n]);
+
+        if (pbo->data) {
+            gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo->buffer);
+            gl->UnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+            gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        }
+        gl->DeleteBuffers(1, &pbo->buffer);
+    }
 
     *pbo = (struct gl_pbo_upload){0};
 }

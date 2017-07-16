@@ -190,6 +190,8 @@ struct gl_pbo_upload {
     int index;
     GLuint buffer;
     size_t buffer_size;
+    GLsync fences[NUM_PBO_BUFFERS];
+    void *data;
 };
 
 void gl_pbo_upload_tex(struct gl_pbo_upload *pbo, GL *gl, bool use_pbo,

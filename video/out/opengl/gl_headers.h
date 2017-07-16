@@ -631,6 +631,10 @@ typedef unsigned short GLhalf;
 #define GL_MAP_INVALIDATE_BUFFER_BIT      0x0008
 #define GL_MAP_FLUSH_EXPLICIT_BIT         0x0010
 #define GL_MAP_UNSYNCHRONIZED_BIT         0x0020
+#define GL_MAP_PERSISTENT_BIT             0x0040
+#define GL_MAP_COHERENT_BIT               0x0080
+#define GL_DYNAMIC_STORAGE_BIT            0x0100
+#define GL_CLIENT_STORAGE_BIT             0x0200
 #define GL_RG                             0x8227
 #define GL_RG_INTEGER                     0x8228
 #define GL_R8                             0x8229

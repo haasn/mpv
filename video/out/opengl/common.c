@@ -173,6 +173,7 @@ static const struct gl_functions gl_functions[] = {
             DEF_FN(BlitFramebuffer),
             DEF_FN(GetStringi),
             DEF_FN(MapBufferRange),
+            DEF_FN(FlushMappedBufferRange),
             // for ES 3.0
             DEF_FN(ReadBuffer),
             DEF_FN(UnmapBuffer),
@@ -272,6 +273,15 @@ static const struct gl_functions gl_functions[] = {
             DEF_FN(FenceSync),
             DEF_FN(ClientWaitSync),
             DEF_FN(DeleteSync),
+            DEF_FN(IsSync),
+            {0}
+        },
+    },
+    {
+        .ver_core = 440,
+        .extension = "GL_ARB_buffer_storage",
+        .functions = (const struct gl_function[]) {
+            DEF_FN(BufferStorage),
             {0}
         },
     },
