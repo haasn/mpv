@@ -100,6 +100,13 @@ struct video_image {
     struct mp_image *mpi;       // original input image
     uint64_t id;                // unique ID identifying mpi contents
     bool hwdec_mapped;
+    GLsync fence;
+};
+
+// An mp_image that is still in use by the GPU, can't be immediately dereferenced
+struct deref {
+    struct mp_image *mpi;
+    GLsync fence;
 };
 
 enum plane_type {
@@ -219,6 +226,8 @@ struct gl_video {
     bool use_integer_conversion;
 
     struct video_image image;
+    struct deref *derefs;
+    int num_derefs;
 
     struct dr_buffer *dr_buffers;
     int num_dr_buffers;
@@ -946,9 +955,54 @@ static void unmap_current_image(struct gl_video *p)
 
 static void unref_current_image(struct gl_video *p)
 {
+    GL *gl = p->gl;
+
     unmap_current_image(p);
-    mp_image_unrefp(&p->image.mpi);
     p->image.id = 0;
+
+    // If this image is still in use (guarded by a fence), we need to wait
+    // before we can deref it, so add it to a deref queue instead
+    if (p->image.fence) {
+        // Find a free spot in the deref queue
+        struct deref *d = NULL;
+        for (int i = 0; i < p->num_derefs; i++) {
+            if (!p->derefs[i].mpi) {
+                d = &p->derefs[i];
+                break;
+            }
+        }
+
+        if (!d) {
+            MP_TARRAY_GROW(p, p->derefs, p->num_derefs);
+            d = &p->derefs[p->num_derefs++];
+        }
+
+        *d = (struct deref) {
+            .mpi = p->image.mpi,
+            .fence = p->image.fence,
+        };
+
+        p->image.mpi = NULL;
+        p->image.fence = NULL;
+    } else {
+        // Image is not in use, so we can deref it immediately
+        mp_image_unrefp(&p->image.mpi);
+    }
+
+    // While we're at it, also garbage collect the derefs in here to get it
+    // out of the way
+    for (int i = 0; i < p->num_derefs; i++) {
+        struct deref *d = &p->derefs[i];
+        if (!d->mpi)
+            continue;
+
+        GLenum res = gl->ClientWaitSync(d->fence, 0, 0); // non-blocking
+        if (res == GL_ALREADY_SIGNALED) {
+            mp_image_unrefp(&d->mpi);
+            gl->DeleteSync(d->fence);
+            d->fence = NULL;
+        }
+    }
 }
 
 // If overlay mode is used, make sure to remove the overlay.
@@ -970,6 +1024,13 @@ static void uninit_video(struct gl_video *p)
 
     unmap_overlay(p);
     unref_current_image(p);
+
+    // Forcibly clean up all derefs
+    for (int n = 0; n < p->num_derefs; n++) {
+        mp_image_unrefp(&p->derefs[n].mpi);
+        gl->DeleteSync(p->derefs[n].fence);
+        p->derefs[n].fence = NULL;
+    }
 
     for (int n = 0; n < p->plane_count; n++) {
         struct texplane *plane = &vimg->planes[n];
@@ -3134,6 +3195,7 @@ static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t
                           plane->gl_format, plane->gl_type,
                           (void *)offset, mpi->stride[n],
                           0, 0, plane->w, plane->h);
+            vimg->fence = gl->FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         } else {
             MP_WARN(p, "non-DR path!\n");
