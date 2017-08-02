@@ -158,6 +158,35 @@ static void polar_sample(struct gl_shader_cache *sc, struct scaler *scaler,
         GLSLF("}\n");
 }
 
+static void polar_antiring(struct gl_shader_cache *sc, struct scaler *scaler)
+{
+    if (scaler->conf.antiring <= 0)
+        return;
+
+    const float radius = 0.5;
+
+    GLSL(vec4 hi = vec4(0.0);)
+    GLSL(vec4 lo = vec4(1.0);)
+
+    GLSL(vec4 real_color = color;)
+    GLSL(vec2 real_pos = pos;)
+
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            if (x == 0 && y == 0)
+                continue;
+            GLSLF("pos = real_pos + pt * %f * normalize(vec2(%d, %d));\n",
+                  radius, x, y);
+            pass_sample_bicubic_fast(sc);
+            GLSL(lo = min(lo, color);)
+            GLSL(hi = max(hi, color);)
+        }
+    }
+
+    GLSLF("color = mix(real_color, clamp(real_color, lo, hi), %f);\n",
+          scaler->conf.antiring);
+}
+
 void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler,
                        int components, int glsl_version)
 {
@@ -214,6 +243,7 @@ void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler,
     }
 
     GLSL(color = color / vec4(wsum);)
+    polar_antiring(sc, scaler);
     GLSLF("}\n");
 }
 
@@ -258,6 +288,7 @@ void pass_compute_polar(struct gl_shader_cache *sc, struct scaler *scaler,
     }
 
     GLSL(color = color / vec4(wsum);)
+    polar_antiring(sc, scaler);
     GLSLF("}\n");
 }
 
