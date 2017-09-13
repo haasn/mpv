@@ -16,6 +16,8 @@
  */
 
 #include "options/m_config.h"
+#include "video/out/gpu/spirv.h"
+
 #include "context.h"
 #include "ra_vk.h"
 #include "utils.h"
@@ -121,6 +123,12 @@ struct priv {
     int idx_acquired;         // index of next free semaphore within this pool
     int last_imgidx;          // the image index last acquired (for submit)
 };
+
+struct mpvk_ctx *ra_vk_ctx_get_vk(struct ra_ctx *ctx)
+{
+    struct priv *p = ctx->swchain->priv;
+    return p->vk;
+}
 
 static bool update_swchain_info(struct priv *p,
                                 VkSwapchainCreateInfoKHR *info)
@@ -262,12 +270,14 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
 
     if (!mpvk_find_phys_device(vk, p->opts->device, ctx->opts.allow_sw))
         goto error;
+    if (!spirv_compiler_init(ctx))
+        goto error;
     if (!mpvk_pick_surface_format(vk))
         goto error;
     if (!mpvk_device_init(vk, ctx->opts.swchain_depth))
         goto error;
 
-    ctx->ra = ra_create_vk(vk, ctx->log);
+    ctx->ra = ra_create_vk(vk, ctx->log, ctx->spirv);
     if (!ctx->ra)
         goto error;
 

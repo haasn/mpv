@@ -779,6 +779,11 @@ video_output_features = [
                 "If you really mean to compile without support for " +
                 "`--vo=gpu`, then use --disable-gpu."
     }, {
+        'name': '--shaderc',
+        'desc': 'libshaderc SPIR-V compiler',
+        'deps': 'gpu',
+        'func': check_cc(header_name='shaderc/shaderc.h', lib='shaderc_shared'),
+    }, {
         'name': 'egl-helpers',
         'desc': 'EGL helper functions',
         'deps': 'egl-x11 || mali-fbdev || rpi || gl-wayland || egl-drm || ' +

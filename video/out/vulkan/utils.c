@@ -338,13 +338,28 @@ bool mpvk_pick_surface_format(struct mpvk_ctx *vk)
         if (formats[i].format == VK_FORMAT_UNDEFINED) {
             vk->surf_format = (VkSurfaceFormatKHR) {
                 .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
-                .format = VK_FORMAT_R8G8B8A8_UNORM,
+                .format = VK_FORMAT_R16G16B16A16_UNORM,
             };
             break;
         }
 
         if (formats[i].colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
             continue;
+
+        // Format whitelist, since we want only >= 8 bit _UNORM formats
+        switch (formats[i].format) {
+        case VK_FORMAT_R8G8B8_UNORM:
+        case VK_FORMAT_B8G8R8_UNORM:
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_B8G8R8A8_UNORM:
+        case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
+        case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
+        case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+        case VK_FORMAT_R16G16B16_UNORM:
+        case VK_FORMAT_R16G16B16A16_UNORM:
+             break; // accept
+        default: continue;
+        }
 
         vk->surf_format = formats[i];
         break;
@@ -504,7 +519,6 @@ bool mpvk_device_init(struct mpvk_ctx *vk, int queue_depth)
 
     static const char *exts[] = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_NV_GLSL_SHADER_EXTENSION_NAME,
     };
 
     VkDeviceCreateInfo dinfo = {

@@ -5,7 +5,8 @@
 #include "common.h"
 #include "utils.h"
 
-struct ra *ra_create_vk(struct mpvk_ctx *vk, struct mp_log *log);
+struct ra *ra_create_vk(struct mpvk_ctx *vk, struct mp_log *log,
+                        struct spirv_compiler *spirv);
 
 // Access to the VkDevice is needed for swapchain creation
 VkDevice ra_vk_get_dev(struct ra *ra);

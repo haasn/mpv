@@ -22,6 +22,7 @@ struct ra_ctx {
     struct ra_ctx_opts opts;
     const struct ra_ctx_fns *fns;
     struct ra_swchain *swchain;
+    struct spirv_compiler *spirv;
 
     void *priv;
 };
