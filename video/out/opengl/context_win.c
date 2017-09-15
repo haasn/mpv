@@ -23,21 +23,13 @@
 #include "video/out/w32_common.h"
 #include "video/out/win32/exclusive_hack.h"
 #include "context.h"
+#include "utils.h"
 
-#if !defined(WGL_CONTEXT_MAJOR_VERSION_ARB)
-/* these are supposed to be defined in wingdi.h but mingw's is too old */
-/* only the bits actually used by mplayer are defined */
-/* reference: http://www.opengl.org/registry/specs/ARB/wgl_create_context.txt */
+#include <GL/wglext.h>
 
-#define WGL_CONTEXT_MAJOR_VERSION_ARB          0x2091
-#define WGL_CONTEXT_MINOR_VERSION_ARB          0x2092
-#define WGL_CONTEXT_FLAGS_ARB                  0x2094
-#define WGL_CONTEXT_PROFILE_MASK_ARB           0x9126
-#define WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB 0x0002
-#define WGL_CONTEXT_CORE_PROFILE_BIT_ARB   0x00000001
-#endif
+struct priv {
+    GL gl;
 
-struct w32_context {
     int opt_swapinterval;
     int current_swapinterval;
 
@@ -45,26 +37,25 @@ struct w32_context {
 
     HGLRC context;
     HDC hdc;
-    int flags;
 };
 
-static void w32_uninit(MPGLContext *ctx);
+static void wgl_uninit(struct ra_ctx *ctx);
 
-static __thread struct w32_context *current_w32_context;
+static __thread struct priv *current_wgl_context;
 
-static int GLAPIENTRY w32_swap_interval(int interval)
+static int GLAPIENTRY wgl_swap_interval(int interval)
 {
-    if (current_w32_context)
-        current_w32_context->opt_swapinterval = interval;
+    if (current_wgl_context)
+        current_wgl_context->opt_swapinterval = interval;
     return 0;
 }
 
-static bool create_dc(struct MPGLContext *ctx, int flags)
+static bool create_dc(struct ra_ctx *ctx)
 {
-    struct w32_context *w32_ctx = ctx->priv;
+    struct priv *p = ctx->priv;
     HWND win = vo_w32_hwnd(ctx->vo);
 
-    if (w32_ctx->hdc)
+    if (p->hdc)
         return true;
 
     HDC hdc = GetDC(win);
@@ -90,11 +81,11 @@ static bool create_dc(struct MPGLContext *ctx, int flags)
 
     SetPixelFormat(hdc, pf, &pfd);
 
-    w32_ctx->hdc = hdc;
+    p->hdc = hdc;
     return true;
 }
 
-static void *w32gpa(const GLubyte *procName)
+static void *wglgpa(const GLubyte *procName)
 {
     HMODULE oglmod;
     void *res = wglGetProcAddress(procName);
@@ -104,11 +95,11 @@ static void *w32gpa(const GLubyte *procName)
     return GetProcAddress(oglmod, procName);
 }
 
-static bool create_context_w32_old(struct MPGLContext *ctx)
+static bool create_context_wgl_old(struct ra_ctx *ctx)
 {
-    struct w32_context *w32_ctx = ctx->priv;
+    struct priv *p = ctx->priv;
 
-    HDC windc = w32_ctx->hdc;
+    HDC windc = p->hdc;
     bool res = false;
 
     HGLRC context = wglCreateContext(windc);
@@ -123,17 +114,15 @@ static bool create_context_w32_old(struct MPGLContext *ctx)
         return res;
     }
 
-    w32_ctx->context = context;
-
-    mpgl_load_functions(ctx->gl, w32gpa, NULL, ctx->vo->log);
+    p->context = context;
     return true;
 }
 
-static bool create_context_w32_gl3(struct MPGLContext *ctx)
+static bool create_context_wgl_gl3(struct ra_ctx *ctx)
 {
-    struct w32_context *w32_ctx = ctx->priv;
+    struct priv *p = ctx->priv;
 
-    HDC windc = w32_ctx->hdc;
+    HDC windc = p->hdc;
     HGLRC context = 0;
 
     // A legacy context is needed to get access to the new functions.
@@ -150,7 +139,7 @@ static bool create_context_w32_gl3(struct MPGLContext *ctx)
     }
 
     const char *(GLAPIENTRY *wglGetExtensionsStringARB)(HDC hdc)
-        = w32gpa((const GLubyte*)"wglGetExtensionsStringARB");
+        = wglgpa((const GLubyte*)"wglGetExtensionsStringARB");
 
     if (!wglGetExtensionsStringARB)
         goto unsupported;
@@ -161,7 +150,7 @@ static bool create_context_w32_gl3(struct MPGLContext *ctx)
 
     HGLRC (GLAPIENTRY *wglCreateContextAttribsARB)(HDC hDC, HGLRC hShareContext,
                                                    const int *attribList)
-        = w32gpa((const GLubyte*)"wglCreateContextAttribsARB");
+        = wglgpa((const GLubyte*)"wglCreateContextAttribsARB");
 
     if (!wglCreateContextAttribsARB)
         goto unsupported;
@@ -197,11 +186,7 @@ static bool create_context_w32_gl3(struct MPGLContext *ctx)
         return false;
     }
 
-    w32_ctx->context = context;
-
-    /* update function pointers */
-    mpgl_load_functions(ctx->gl, w32gpa, NULL, ctx->vo->log);
-
+    p->context = context;
     return true;
 
 unsupported:
@@ -214,79 +199,126 @@ out:
 
 static void create_ctx(void *ptr)
 {
-    struct MPGLContext *ctx = ptr;
-    struct w32_context *w32_ctx = ctx->priv;
+    struct ra_ctx *ctx = ptr;
+    struct priv *p = ctx->priv;
 
-    if (!create_dc(ctx, w32_ctx->flags))
+    if (!create_dc(ctx))
         return;
 
-    create_context_w32_gl3(ctx);
-    if (!w32_ctx->context)
-        create_context_w32_old(ctx);
+    create_context_wgl_gl3(ctx);
+    if (!p->context)
+        create_context_wgl_old(ctx);
 
-    wglMakeCurrent(w32_ctx->hdc, NULL);
+    wglMakeCurrent(p->hdc, NULL);
 }
 
-static int w32_init(struct MPGLContext *ctx, int flags)
+static void wgl_swap_buffers(struct ra_ctx *ctx)
 {
+    struct priv *p = ctx->priv;
+    SwapBuffers(p->hdc);
+
+    // default if we don't DwmFLush
+    int new_swapinterval = p->opt_swapinterval;
+
+    int dwm_flush_opt;
+    mp_read_option_raw(ctx->global, "opengl-dwmflush", &m_option_type_choice,
+                       &dwm_flush_opt);
+
+    if (dwm_flush_opt >= 0) {
+        if ((dwm_flush_opt == 1 && !ctx->vo->opts->fullscreen) ||
+            (dwm_flush_opt == 2) ||
+            (dwm_flush_opt == 0 && compositor_active(ctx)))
+        {
+            if (DwmFlush() == S_OK)
+                new_swapinterval = 0;
+        }
+    }
+
+    if (new_swapinterval != p->current_swapinterval &&
+        p->real_wglSwapInterval)
+    {
+        p->real_wglSwapInterval(new_swapinterval);
+        MP_VERBOSE(ctx->vo, "set SwapInterval(%d)\n", new_swapinterval);
+    }
+    p->current_swapinterval = new_swapinterval;
+}
+
+static bool wgl_init(struct ra_ctx *ctx)
+{
+    struct priv *p = ctx->priv = talloc_zero(ctx, struct priv);
+    GL *gl = &p->gl;
+
     if (!vo_w32_init(ctx->vo))
         goto fail;
 
-    struct w32_context *w32_ctx = ctx->priv;
-
-    w32_ctx->flags = flags;
     vo_w32_run_on_thread(ctx->vo, create_ctx, ctx);
-
-    if (!w32_ctx->context)
+    if (!p->context)
         goto fail;
 
-    if (!ctx->gl->SwapInterval)
-        MP_VERBOSE(ctx->vo, "WGL_EXT_swap_control missing.\n");
-    w32_ctx->real_wglSwapInterval = ctx->gl->SwapInterval;
-    ctx->gl->SwapInterval = w32_swap_interval;
-    w32_ctx->current_swapinterval = -1;
+    current_wgl_context = p;
+    wglMakeCurrent(p->hdc, p->context);
 
-    current_w32_context = w32_ctx;
-    wglMakeCurrent(w32_ctx->hdc, w32_ctx->context);
+    mpgl_load_functions(gl, wglgpa, NULL, ctx->vo->log);
+
+    if (!gl->SwapInterval)
+        MP_VERBOSE(ctx->vo, "WGL_EXT_swap_control missing.\n");
+    p->real_wglSwapInterval = gl->SwapInterval;
+    gl->SwapInterval = wgl_swap_interval;
+    p->current_swapinterval = -1;
+
+    struct ra_gl_ctx_params params = {
+        .swap_buffers = wgl_swap_buffers,
+    };
+
+    if (!ra_gl_ctx_init(ctx, gl, params))
+        goto fail;
+
     DwmEnableMMCSS(TRUE);
-    return 0;
+    return true;
 
 fail:
-    w32_uninit(ctx);
-    return -1;
+    wgl_uninit(ctx);
+    return false;
 }
 
-static int w32_reconfig(struct MPGLContext *ctx)
+static void resize(struct ra_ctx *ctx)
+{
+    ra_gl_ctx_resize(ctx->swchain, ctx->vo->dwidth, ctx->vo->dheight, 0);
+}
+
+static bool wgl_reconfig(struct ra_ctx *ctx)
 {
     vo_w32_config(ctx->vo);
-    return 0;
+    resize(ctx);
+    return true;
 }
 
 static void destroy_gl(void *ptr)
 {
-    struct MPGLContext *ctx = ptr;
-    struct w32_context *w32_ctx = ctx->priv;
-    if (w32_ctx->context)
-        wglDeleteContext(w32_ctx->context);
-    w32_ctx->context = 0;
-    if (w32_ctx->hdc)
-        ReleaseDC(vo_w32_hwnd(ctx->vo), w32_ctx->hdc);
-    w32_ctx->hdc = NULL;
-    current_w32_context = NULL;
+    struct ra_ctx *ctx = ptr;
+    struct priv *p = ctx->priv;
+    if (p->context)
+        wglDeleteContext(p->context);
+    p->context = 0;
+    if (p->hdc)
+        ReleaseDC(vo_w32_hwnd(ctx->vo), p->hdc);
+    p->hdc = NULL;
+    current_wgl_context = NULL;
 }
 
-static void w32_uninit(MPGLContext *ctx)
+static void wgl_uninit(struct ra_ctx *ctx)
 {
-    struct w32_context *w32_ctx = ctx->priv;
-    if (w32_ctx->context)
-        wglMakeCurrent(w32_ctx->hdc, 0);
+    struct priv *p = ctx->priv;
+    ra_gl_ctx_uninit(ctx);
+    if (p->context)
+        wglMakeCurrent(p->hdc, 0);
     vo_w32_run_on_thread(ctx->vo, destroy_gl, ctx);
 
     DwmEnableMMCSS(FALSE);
     vo_w32_uninit(ctx->vo);
 }
 
-static bool compositor_active(MPGLContext *ctx)
+static bool compositor_active(struct ra_ctx *ctx)
 {
     // For Windows 7.
     BOOL enabled = 0;
@@ -308,48 +340,19 @@ static bool compositor_active(MPGLContext *ctx)
     return true;
 }
 
-static void w32_swap_buffers(MPGLContext *ctx)
+static int wgl_control(struct ra_ctx *ctx, int *events, int request, void *arg)
 {
-    struct w32_context *w32_ctx = ctx->priv;
-    SwapBuffers(w32_ctx->hdc);
-
-    // default if we don't DwmFLush
-    int new_swapinterval = w32_ctx->opt_swapinterval;
-
-    int dwm_flush_opt;
-    mp_read_option_raw(ctx->global, "opengl-dwmflush", &m_option_type_choice,
-                       &dwm_flush_opt);
-
-    if (dwm_flush_opt >= 0) {
-        if ((dwm_flush_opt == 1 && !ctx->vo->opts->fullscreen) ||
-            (dwm_flush_opt == 2) ||
-            (dwm_flush_opt == 0 && compositor_active(ctx)))
-        {
-            if (DwmFlush() == S_OK)
-                new_swapinterval = 0;
-        }
-    }
-
-    if (new_swapinterval != w32_ctx->current_swapinterval &&
-        w32_ctx->real_wglSwapInterval)
-    {
-        w32_ctx->real_wglSwapInterval(new_swapinterval);
-        MP_VERBOSE(ctx->vo, "set SwapInterval(%d)\n", new_swapinterval);
-    }
-    w32_ctx->current_swapinterval = new_swapinterval;
+    int ret = vo_w32_control(ctx->vo, events, request, arg);
+    if (*events & VO_EVENT_RESIZE)
+        resize(ctx);
+    return ret;
 }
 
-static int w32_control(MPGLContext *ctx, int *events, int request, void *arg)
-{
-    return vo_w32_control(ctx->vo, events, request, arg);
-}
-
-const struct mpgl_driver mpgl_driver_w32 = {
+const struct ra_ctx_fns ra_ctx_wgl = {
+    .type           = RA_API_OPENGL,
     .name           = "win",
-    .priv_size      = sizeof(struct w32_context),
-    .init           = w32_init,
-    .reconfig       = w32_reconfig,
-    .swap_buffers   = w32_swap_buffers,
-    .control        = w32_control,
-    .uninit         = w32_uninit,
+    .init           = wgl_init,
+    .reconfig       = wgl_reconfig,
+    .control        = wgl_control,
+    .uninit         = wgl_uninit,
 };
