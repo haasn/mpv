@@ -64,7 +64,13 @@ static bool wayland_init(struct ra_ctx *ctx)
         goto error;
     }
 
-    if (!ra_vk_ctx_init(ctx, vk))
+    /* Because in Wayland clients render whenever they receive a callback from
+     * the compositor, and the fact that the compositor usually stops sending
+     * callbacks once the surface is no longer visible, using FIFO here would
+     * mean the entire player would block on acquiring swapchain images. Hence,
+     * use MAILBOX to guarantee that there'll always be a swapchain image and
+     * the player won't block waiting on those */
+    if (!ra_vk_ctx_init(ctx, vk, VK_PRESENT_MODE_MAILBOX_KHR))
         goto error;
 
     return true;
