@@ -1077,11 +1077,11 @@ static void pass_prepare_src_tex(struct gl_video *p)
             f[0] = s->tex->params.w;
             f[1] = s->tex->params.h;
         }
-        gl_sc_uniform_vec2(sc, texture_size, f);
-        gl_sc_uniform_mat2(sc, texture_rot, true, (float *)s->transform.m);
-        gl_sc_uniform_vec2(sc, texture_off, (float *)s->transform.t);
+        gl_sc_uniform_vec2(sc, texture_size, f, 0);
+        gl_sc_uniform_mat2(sc, texture_rot, true, (float *)s->transform.m, 0);
+        gl_sc_uniform_vec2(sc, texture_off, (float *)s->transform.t, 0);
         gl_sc_uniform_vec2(sc, pixel_size, (float[]){1.0f / f[0],
-                                                     1.0f / f[1]});
+                                                     1.0f / f[1]}, 0);
     }
 }
 
@@ -1112,7 +1112,7 @@ static void dispatch_compute(struct gl_video *p, int w, int h,
     // Since we don't actually have vertices, we pretend for convenience
     // reasons that we do and calculate the right texture coordinates based on
     // the output sample ID
-    gl_sc_uniform_vec2(p->sc, "out_scale", (float[2]){ 1.0 / w, 1.0 / h });
+    gl_sc_uniform_vec2(p->sc, "out_scale", (float[2]){ 1.0 / w, 1.0 / h }, 0);
     PRELUDE("#define outcoord(id) (out_scale * (vec2(id) + vec2(0.5)))\n");
 
     for (int n = 0; n < TEXUNIT_VIDEO_NUM; n++) {
@@ -1126,7 +1126,7 @@ static void dispatch_compute(struct gl_video *p, int w, int h,
         gl_sc_uniform_vec2(p->sc, tex_scale, (float[2]){
                 (float)s->w / s->tex->params.w,
                 (float)s->h / s->tex->params.h,
-        });
+        }, 0);
 
         PRELUDE("#define texcoord%d_raw(id) (tex_scale%d * outcoord(id))\n", n, n);
         PRELUDE("#define texcoord%d_rot(id) (texture_rot%d * texcoord%d_raw(id) + "
@@ -1499,21 +1499,22 @@ found:
 static void load_shader(struct gl_video *p, struct bstr body)
 {
     gl_sc_hadd_bstr(p->sc, body);
-    gl_sc_uniform_f(p->sc, "random", (double)av_lfg_get(&p->lfg) / UINT32_MAX);
-    gl_sc_uniform_i(p->sc, "frame", p->frames_uploaded);
+    gl_sc_uniform_f(p->sc, "random", (double)av_lfg_get(&p->lfg) / UINT32_MAX,
+                    SC_UNIFORM_DYNAMIC);
+    gl_sc_uniform_i(p->sc, "frame", p->frames_uploaded, SC_UNIFORM_DYNAMIC);
     gl_sc_uniform_vec2(p->sc, "input_size",
                        (float[]){(p->src_rect.x1 - p->src_rect.x0) *
                                   p->texture_offset.m[0][0],
                                   (p->src_rect.y1 - p->src_rect.y0) *
-                                  p->texture_offset.m[1][1]});
+                                  p->texture_offset.m[1][1]}, 0);
     gl_sc_uniform_vec2(p->sc, "target_size",
                        (float[]){p->dst_rect.x1 - p->dst_rect.x0,
-                                 p->dst_rect.y1 - p->dst_rect.y0});
+                                 p->dst_rect.y1 - p->dst_rect.y0}, 0);
     gl_sc_uniform_vec2(p->sc, "tex_offset",
                        (float[]){p->src_rect.x0 * p->texture_offset.m[0][0] +
                                  p->texture_offset.t[0],
                                  p->src_rect.y0 * p->texture_offset.m[1][1] +
-                                 p->texture_offset.t[1]});
+                                 p->texture_offset.t[1]}, 0);
 }
 
 // Semantic equality
@@ -2189,8 +2190,8 @@ static void pass_convert_yuv(struct gl_video *p)
     // and contrast controls, or expansion of e.g. LSB-packed 10 bit data.
     struct mp_cmat m = {{{0}}};
     mp_get_csp_matrix(&cparams, &m);
-    gl_sc_uniform_mat3(sc, "colormatrix", true, &m.m[0][0]);
-    gl_sc_uniform_vec3(sc, "colormatrix_c", m.c);
+    gl_sc_uniform_mat3(sc, "colormatrix", true, &m.m[0][0], 0);
+    gl_sc_uniform_vec3(sc, "colormatrix_c", m.c, 0);
 
     GLSL(color.rgb = mat3(colormatrix) * color.rgb + colormatrix_c;)
 
@@ -2577,7 +2578,8 @@ static void pass_dither(struct gl_video *p)
 
         float matrix[2][2] = {{cos(r),     -sin(r)    },
                               {sin(r) * m,  cos(r) * m}};
-        gl_sc_uniform_mat2(p->sc, "dither_trafo", true, &matrix[0][0]);
+        gl_sc_uniform_mat2(p->sc, "dither_trafo", true, &matrix[0][0],
+                           SC_UNIFORM_DYNAMIC);
 
         GLSL(dither_pos = dither_trafo * dither_pos;)
     }
@@ -2748,7 +2750,7 @@ static void pass_draw_to_screen(struct gl_video *p, struct fbodst fbo)
 
     // Adjust the overall gamma before drawing to screen
     if (p->user_gamma != 1) {
-        gl_sc_uniform_f(p->sc, "user_gamma", p->user_gamma);
+        gl_sc_uniform_f(p->sc, "user_gamma", p->user_gamma, 0);
         GLSL(color.rgb = clamp(color.rgb, 0.0, 1.0);)
         GLSL(color.rgb = pow(color.rgb, vec3(user_gamma));)
     }
@@ -2955,12 +2957,12 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
 
         // Blend the frames together
         if (oversample || linear) {
-            gl_sc_uniform_f(p->sc, "inter_coeff", mix);
+            gl_sc_uniform_f(p->sc, "inter_coeff", mix, SC_UNIFORM_DYNAMIC);
             GLSL(color = mix(texture(texture0, texcoord0),
                              texture(texture1, texcoord1),
                              inter_coeff);)
         } else {
-            gl_sc_uniform_f(p->sc, "fcoord", mix);
+            gl_sc_uniform_f(p->sc, "fcoord", mix, SC_UNIFORM_DYNAMIC);
             pass_sample_separated_gen(p->sc, tscale, 0, 0);
         }
 

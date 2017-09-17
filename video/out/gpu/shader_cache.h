@@ -25,20 +25,26 @@ void gl_sc_haddf(struct gl_shader_cache *sc, const char *textf, ...)
 void gl_sc_hadd_bstr(struct gl_shader_cache *sc, struct bstr text);
 void gl_sc_paddf(struct gl_shader_cache *sc, const char *textf, ...)
     PRINTF_ATTRIBUTE(2, 3);
+
+/// "Hints" for uniforms
+enum {
+    SC_UNIFORM_DYNAMIC  = (1 << 0), // value changes frequently
+};
+
 void gl_sc_uniform_texture(struct gl_shader_cache *sc, char *name,
                            struct ra_tex *tex);
 void gl_sc_uniform_image2D_wo(struct gl_shader_cache *sc, const char *name,
                               struct ra_tex *tex);
 void gl_sc_ssbo(struct gl_shader_cache *sc, char *name, struct ra_buf *buf,
                 char *format, ...) PRINTF_ATTRIBUTE(4, 5);
-void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, float f);
-void gl_sc_uniform_i(struct gl_shader_cache *sc, char *name, int f);
-void gl_sc_uniform_vec2(struct gl_shader_cache *sc, char *name, float f[2]);
-void gl_sc_uniform_vec3(struct gl_shader_cache *sc, char *name, float f[3]);
+void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, float f, int flags);
+void gl_sc_uniform_i(struct gl_shader_cache *sc, char *name, int f, int flags);
+void gl_sc_uniform_vec2(struct gl_shader_cache *sc, char *name, float f[2], int flags);
+void gl_sc_uniform_vec3(struct gl_shader_cache *sc, char *name, float f[3], int flags);
 void gl_sc_uniform_mat2(struct gl_shader_cache *sc, char *name,
-                        bool transpose, float *v);
+                        bool transpose, float *v, int flags);
 void gl_sc_uniform_mat3(struct gl_shader_cache *sc, char *name,
-                        bool transpose, float *v);
+                        bool transpose, float *v, int flags);
 void gl_sc_set_vertex_format(struct gl_shader_cache *sc,
                              const struct ra_renderpass_input *vertex_attribs,
                              int vertex_stride);

@@ -263,12 +263,15 @@ static int gl_sc_next_binding(struct gl_shader_cache *sc, enum ra_vartype type)
 
 // Updates the metadata for the given sc_uniform. Assumes sc_uniform->input
 // and glsl_type/buffer_format are already set.
-static void update_uniform_params(struct gl_shader_cache *sc, struct sc_uniform *u)
+static void update_uniform_params(struct gl_shader_cache *sc,
+                                  struct sc_uniform *u, int flags)
 {
+    bool dynamic = flags & SC_UNIFORM_DYNAMIC;
+
     // Try not using push constants for "large" values like matrices, since
     // this is likely to both exceed the VGPR budget as well as the pushc size
     // budget
-    bool try_pushc = u->input.dim_m == 1;
+    bool try_pushc = u->input.dim_m == 1 || dynamic;
 
     // Attempt using push constants first
     if (try_pushc && sc->ra->glsl_vulkan && sc->ra->max_pushc_size) {
@@ -289,7 +292,10 @@ static void update_uniform_params(struct gl_shader_cache *sc, struct sc_uniform 
     // to explicit offsets on UBO entries. In theory we could leave away
     // the offsets and support UBOs for older GL as well, but this is a nice
     // safety net for driver bugs (and also rules out potentially buggy drivers)
-    if (sc->ra->glsl_version >= 440 && (sc->ra->caps & RA_CAP_BUF_RO)) {
+    // Also avoid UBOs for highly dynamic stuff since that requires synchronizing
+    // the UBO writes every frame
+    bool try_ubo = !(sc->ra->caps & RA_CAP_GLOBAL_UNIFORM) || !dynamic;
+    if (try_ubo && sc->ra->glsl_version >= 440 && (sc->ra->caps & RA_CAP_BUF_RO)) {
         u->type = SC_UNIFORM_TYPE_UBO;
         u->layout = sc->ra->fns->uniform_layout(&u->input);
         u->offset = MP_ALIGN_UP(sc->ubo_size, u->layout.align);
@@ -355,42 +361,42 @@ void gl_sc_ssbo(struct gl_shader_cache *sc, char *name, struct ra_buf *buf,
     va_end(ap);
 }
 
-void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, float f)
+void gl_sc_uniform_f(struct gl_shader_cache *sc, char *name, float f, int flags)
 {
     struct sc_uniform *u = find_uniform(sc, name);
     u->input.type = RA_VARTYPE_FLOAT;
     u->glsl_type = "float";
-    update_uniform_params(sc, u);
+    update_uniform_params(sc, u, flags);
     u->v.f[0] = f;
 }
 
-void gl_sc_uniform_i(struct gl_shader_cache *sc, char *name, int i)
+void gl_sc_uniform_i(struct gl_shader_cache *sc, char *name, int i, int flags)
 {
     struct sc_uniform *u = find_uniform(sc, name);
     u->input.type = RA_VARTYPE_INT;
     u->glsl_type = "int";
-    update_uniform_params(sc, u);
+    update_uniform_params(sc, u, flags);
     u->v.i[0] = i;
 }
 
-void gl_sc_uniform_vec2(struct gl_shader_cache *sc, char *name, float f[2])
+void gl_sc_uniform_vec2(struct gl_shader_cache *sc, char *name, float f[2], int flags)
 {
     struct sc_uniform *u = find_uniform(sc, name);
     u->input.type = RA_VARTYPE_FLOAT;
     u->input.dim_v = 2;
     u->glsl_type = "vec2";
-    update_uniform_params(sc, u);
+    update_uniform_params(sc, u, flags);
     u->v.f[0] = f[0];
     u->v.f[1] = f[1];
 }
 
-void gl_sc_uniform_vec3(struct gl_shader_cache *sc, char *name, float f[3])
+void gl_sc_uniform_vec3(struct gl_shader_cache *sc, char *name, float f[3], int flags)
 {
     struct sc_uniform *u = find_uniform(sc, name);
     u->input.type = RA_VARTYPE_FLOAT;
     u->input.dim_v = 3;
     u->glsl_type = "vec3";
-    update_uniform_params(sc, u);
+    update_uniform_params(sc, u, flags);
     u->v.f[0] = f[0];
     u->v.f[1] = f[1];
     u->v.f[2] = f[2];
@@ -402,14 +408,14 @@ static void transpose2x2(float r[2 * 2])
 }
 
 void gl_sc_uniform_mat2(struct gl_shader_cache *sc, char *name,
-                        bool transpose, float *v)
+                        bool transpose, float *v, int flags)
 {
     struct sc_uniform *u = find_uniform(sc, name);
     u->input.type = RA_VARTYPE_FLOAT;
     u->input.dim_v = 2;
     u->input.dim_m = 2;
     u->glsl_type = "mat2";
-    update_uniform_params(sc, u);
+    update_uniform_params(sc, u, flags);
     for (int n = 0; n < 4; n++)
         u->v.f[n] = v[n];
     if (transpose)
@@ -424,14 +430,14 @@ static void transpose3x3(float r[3 * 3])
 }
 
 void gl_sc_uniform_mat3(struct gl_shader_cache *sc, char *name,
-                        bool transpose, float *v)
+                        bool transpose, float *v, int flags)
 {
     struct sc_uniform *u = find_uniform(sc, name);
     u->input.type = RA_VARTYPE_FLOAT;
     u->input.dim_v = 3;
     u->input.dim_m = 3;
     u->glsl_type = "mat3";
-    update_uniform_params(sc, u);
+    update_uniform_params(sc, u, flags);
     for (int n = 0; n < 9; n++)
         u->v.f[n] = v[n];
     if (transpose)
@@ -515,6 +521,13 @@ static void update_uniform(struct gl_shader_cache *sc, struct sc_entry *e,
 
     un->v = u->v;
     un->set = true;
+
+    static const char *desc[] = {
+        [SC_UNIFORM_TYPE_UBO]    = "UBO",
+        [SC_UNIFORM_TYPE_PUSHC]  = "PC",
+        [SC_UNIFORM_TYPE_GLOBAL] = "global",
+    };
+    MP_TRACE(sc, "Updating %s uniform '%s'\n", desc[u->type], u->input.name);
 
     switch (u->type) {
     case SC_UNIFORM_TYPE_GLOBAL: {

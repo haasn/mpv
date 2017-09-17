@@ -298,7 +298,7 @@ void pass_sample_oversample(struct gl_shader_cache *sc, struct scaler *scaler,
     GLSL(vec2 pos = pos - vec2(0.5) * pt;) // round to nearest
     GLSL(vec2 fcoord = fract(pos * size - vec2(0.5));)
     // Determine the mixing coefficient vector
-    gl_sc_uniform_vec2(sc, "output_size", (float[2]){w, h});
+    gl_sc_uniform_vec2(sc, "output_size", (float[2]){w, h}, 0);
     GLSL(vec2 coeff = fcoord * output_size/size;)
     float threshold = scaler->conf.kernel.params[0];
     threshold = isnan(threshold) ? 0.0 : threshold;
@@ -696,9 +696,9 @@ void pass_color_map(struct gl_shader_cache *sc,
     // them available
     float rgb2xyz[3][3];
     mp_get_rgb2xyz_matrix(mp_get_csp_primaries(src.primaries), rgb2xyz);
-    gl_sc_uniform_vec3(sc, "src_luma", rgb2xyz[1]);
+    gl_sc_uniform_vec3(sc, "src_luma", rgb2xyz[1], 0);
     mp_get_rgb2xyz_matrix(mp_get_csp_primaries(dst.primaries), rgb2xyz);
-    gl_sc_uniform_vec3(sc, "dst_luma", rgb2xyz[1]);
+    gl_sc_uniform_vec3(sc, "dst_luma", rgb2xyz[1], 0);
 
     // All operations from here on require linear light as a starting point,
     // so we linearize even if src.gamma == dst.gamma when one of the other
@@ -731,7 +731,7 @@ void pass_color_map(struct gl_shader_cache *sc,
                                 csp_dst = mp_get_csp_primaries(dst.primaries);
         float m[3][3] = {{0}};
         mp_get_cms_matrix(csp_src, csp_dst, MP_INTENT_RELATIVE_COLORIMETRIC, m);
-        gl_sc_uniform_mat3(sc, "cms_matrix", true, &m[0][0]);
+        gl_sc_uniform_mat3(sc, "cms_matrix", true, &m[0][0], 0);
         GLSL(color.rgb = cms_matrix * color.rgb;)
         // Since this can reduce the gamut, figure out by how much
         for (int c = 0; c < 3; c++)
@@ -770,7 +770,8 @@ static void prng_init(struct gl_shader_cache *sc, AVLFG *lfg)
     // Initialize the PRNG by hashing the position + a random uniform
     GLSL(vec3 _m = vec3(HOOKED_pos, random) + vec3(1.0);)
     GLSL(float h = permute(permute(permute(_m.x)+_m.y)+_m.z);)
-    gl_sc_uniform_f(sc, "random", (double)av_lfg_get(lfg) / UINT32_MAX);
+    gl_sc_uniform_f(sc, "random", (double)av_lfg_get(lfg) / UINT32_MAX,
+                    SC_UNIFORM_DYNAMIC);
 }
 
 struct deband_opts {
