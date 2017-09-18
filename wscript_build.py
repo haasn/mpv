@@ -392,6 +392,7 @@ def build(ctx):
         ( "video/out/gpu/shader_cache.c",        "gpu" ),
         ( "video/out/gpu/spirv.c",               "gpu" ),
         ( "video/out/gpu/spirv_shaderc.c",       "shaderc" ),
+        ( "video/out/gpu/spirv_glslang.c",       "gpu" ),
         ( "video/out/gpu/user_shaders.c",        "gpu" ),
         ( "video/out/gpu/utils.c",               "gpu" ),
         ( "video/out/gpu/video.c",               "gpu" ),

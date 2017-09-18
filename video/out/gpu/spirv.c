@@ -6,12 +6,14 @@
 
 extern const struct spirv_compiler_fns spirv_shaderc;
 extern const struct spirv_compiler_fns spirv_nvidia_builtin;
+extern const struct spirv_compiler_fns spirv_glslang_subprocess;
 
 // in probe-order
 enum {
     SPIRV_AUTO = 0,
     SPIRV_SHADERC, // generally preferred, but not packaged everywhere
     SPIRV_NVIDIA,  // can be useful for testing, only available on nvidia
+    SPIRV_GLSLANG, // dumb hack for when all else fails
 };
 
 static const struct spirv_compiler_fns *compilers[] = {
@@ -21,6 +23,7 @@ static const struct spirv_compiler_fns *compilers[] = {
 #if HAVE_VULKAN
     [SPIRV_NVIDIA]  = &spirv_nvidia_builtin,
 #endif
+    [SPIRV_GLSLANG] = &spirv_glslang_subprocess,
 };
 
 static const struct m_opt_choice_alternatives compiler_choices[] = {
@@ -31,6 +34,7 @@ static const struct m_opt_choice_alternatives compiler_choices[] = {
 #if HAVE_VULKAN
     {"nvidia",      SPIRV_NVIDIA},
 #endif
+    {"glslang-bin", SPIRV_GLSLANG},
     {0}
 };
 

@@ -4209,6 +4209,10 @@ The following video options are currently all specific to ``--vo=gpu`` and
         Use nvidia's built-in compiler. Only works for nvidia GPUs. Can be
         buggy, but also supports some features glslang does not. Only works
         with vulkan.
+    glslang-bin
+        Use glslang as a binary. ``glslangValidator`` must be in your PATH.
+        Hacky, slow, and leaves files lying around in ``/tmp``. Use only as a
+        last resort.
 
 ``--glsl-shaders=<file-list>``
     Custom GLSL hooks. These are a flexible way to add custom fragment shaders,
