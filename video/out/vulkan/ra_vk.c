@@ -314,7 +314,7 @@ struct ra_tex_vk {
     struct vk_memslice mem;
     VkImageType type;
     VkImage img;
-    bool inuse;
+    int refcount;
     // for sampling
     VkImageView view;
     VkSampler sampler;
@@ -331,7 +331,8 @@ struct ra_tex_vk {
 
 static void tex_free_to_use(void *priv, struct ra_tex_vk *tex_vk)
 {
-    tex_vk->inuse = false;
+    assert(tex_vk->refcount > 0);
+    tex_vk->refcount--;
 }
 
 // Small helper to ease image barrier creation. if `discard` is set, the contents
@@ -368,8 +369,8 @@ static void tex_barrier(struct vk_cmd *cmd, struct ra_tex_vk *tex_vk,
     tex_vk->current_stage = newStage;
     tex_vk->current_layout = newLayout;
     tex_vk->current_access = newAccess;
-    tex_vk->inuse = true;
 
+    tex_vk->refcount++;
     vk_cmd_callback(cmd, (vk_cb) tex_free_to_use, NULL, tex_vk);
 }
 
@@ -380,6 +381,7 @@ static void vk_tex_destroy(struct ra *ra, struct ra_tex *tex)
 
     struct mpvk_ctx *vk = ra_vk_get(ra);
     struct ra_tex_vk *tex_vk = tex->priv;
+    assert(tex_vk->refcount == 0);
 
     ra_buf_pool_uninit(ra, &tex_vk->pbo);
     vkDestroyFramebuffer(vk->dev, tex_vk->framebuffer, MPVK_ALLOCATOR);
@@ -676,13 +678,13 @@ static bool vk_tex_poll(struct ra *ra, struct ra_tex *tex)
             safe = false;
     }
 
-    return safe || !tex_vk->inuse;
+    return safe || !tex_vk->refcount;
 }
 
 // For ra_buf.priv
 struct ra_buf_vk {
     struct vk_bufslice slice;
-    bool inuse;
+    int refcount;
     bool needsflush;
     enum queue_type update_queue;
     // "current" metadata, can change during course of execution
@@ -692,7 +694,8 @@ struct ra_buf_vk {
 
 static void buf_free_to_use(void *priv, struct ra_buf_vk *buf_vk)
 {
-    buf_vk->inuse = false;
+    assert(buf_vk->refcount > 0);
+    buf_vk->refcount--;
 }
 
 static void buf_barrier(struct vk_cmd *cmd, struct ra_buf *buf,
@@ -723,8 +726,8 @@ static void buf_barrier(struct vk_cmd *cmd, struct ra_buf *buf,
 
     buf_vk->current_stage = newStage;
     buf_vk->current_access = newAccess;
-    buf_vk->inuse = true;
 
+    buf_vk->refcount++;
     vk_cmd_callback(cmd, (vk_cb) buf_free_to_use, NULL, buf_vk);
 }
 
@@ -735,6 +738,7 @@ static void vk_buf_destroy(struct ra *ra, struct ra_buf *buf)
 
     struct mpvk_ctx *vk = ra_vk_get(ra);
     struct ra_buf_vk *buf_vk = buf->priv;
+    assert(buf_vk->refcount == 0);
 
     if (buf_vk->slice.buf)
         vk_free_memslice(vk, buf_vk->slice.mem);
@@ -851,7 +855,7 @@ error:
 static bool vk_buf_poll(struct ra *ra, struct ra_buf *buf)
 {
     struct ra_buf_vk *buf_vk = buf->priv;
-    return !buf_vk->inuse;
+    return !buf_vk->refcount;
 }
 
 static bool vk_tex_upload(struct ra *ra,

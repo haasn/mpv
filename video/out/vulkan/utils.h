@@ -65,6 +65,9 @@ void mpvk_dev_wait_idle(struct mpvk_ctx *vk);
 void mpvk_pool_poll_cmds(struct mpvk_ctx *vk, struct vk_cmdpool *pool,
                          uint64_t timeout);
 
+// Calls mpvk_pool_poll_cmds on all pools of the device.
+void mpvk_dev_poll_cmds(struct mpvk_ctx *vk, uint64_t timeout);
+
 // Since lots of vulkan operations need to be done lazily once the affected
 // resources are no longer in use, provide an abstraction for tracking these.
 // In practice, these are only checked and run when submitting new commands, so
