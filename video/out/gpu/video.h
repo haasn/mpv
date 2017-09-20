@@ -55,7 +55,6 @@ struct scaler {
     bool initialized;
     struct filter_kernel *kernel;
     struct ra_tex *lut;
-    struct ra_tex *sep_fbo;
     bool insufficient;
     int lut_size;
 

@@ -167,30 +167,87 @@ struct ra_layout std430_layout(struct ra_renderpass_input *inp)
     };
 }
 
-// Resize a texture to a new desired size and format if necessary
-bool ra_tex_resize(struct ra *ra, struct mp_log *log, struct ra_tex **tex,
-                   int w, int h, const struct ra_format *fmt)
+#define RA_TEX_ENTRY_MAX_AGE 10
+
+struct ra_tex_entry {
+    struct ra_tex_pool *pool;
+    struct ra_tex_ref ref; // ref.priv points at this entry
+    int age;  // for garbage collection
+    int refs; // for refcounting
+};
+
+struct ra_tex_pool {
+    struct ra *ra;
+    const struct ra_format *fmt;
+    // Textures currently in the pool
+    struct ra_tex_entry **avail;
+    int num_avail;
+};
+
+static void ra_tex_pool_uninit(struct ra_tex_pool *pool)
 {
-    if (*tex) {
-        struct ra_tex_params cur_params = (*tex)->params;
-        if (cur_params.w == w && cur_params.h == h && cur_params.format == fmt)
-            return true;
+    for (int i = 0; i < pool->num_avail; i++) {
+        ra_tex_free(pool->ra, &pool->avail[i]->ref.tex);
+        talloc_free(pool->avail[i]);
     }
 
-    mp_verbose(log, "Resizing texture: %dx%d\n", w, h);
+    talloc_free(pool);
+}
 
-    if (!fmt || !fmt->renderable || !fmt->linear_filter) {
-        mp_err(log, "Format %s not supported.\n", fmt ? fmt->name : "(unset)");
-        return false;
+void ra_tex_pool_free(struct ra_tex_pool **pool)
+{
+    if (*pool)
+        ra_tex_pool_uninit(*pool);
+    *pool = NULL;
+}
+
+void ra_tex_pool_gc_tick(struct ra_tex_pool *pool)
+{
+    for (int i = 0; i < pool->num_avail; i++) {
+        struct ra_tex_entry *entry = pool->avail[i];
+        if (++entry->age > RA_TEX_ENTRY_MAX_AGE) {
+            MP_VERBOSE(pool->ra, "Freeing %dx%d texture due to old age.\n",
+                       entry->ref.tex->params.w, entry->ref.tex->params.h);
+            ra_tex_free(pool->ra, &entry->ref.tex);
+            talloc_free(entry);
+            // Remove from the array and repeat this loop iteration
+            MP_TARRAY_REMOVE_AT(pool->avail, pool->num_avail, i--);
+        }
+    }
+}
+
+struct ra_tex_pool *ra_tex_pool_alloc(struct ra *ra, const struct ra_format *fmt)
+{
+    if (!fmt || !fmt->renderable || !fmt->linear_filter)
+        return NULL;
+
+    struct ra_tex_pool *pool = talloc_ptrtype(NULL, pool);
+    *pool = (struct ra_tex_pool) {
+        .ra = ra,
+        .fmt = fmt,
+    };
+
+    return pool;
+}
+
+struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool, int w, int h)
+{
+    for (int i = 0; i < pool->num_avail; i++) {
+        struct ra_tex_entry *entry = pool->avail[i];
+        if (entry->ref.tex->params.w == w && entry->ref.tex->params.h == h) {
+            MP_TARRAY_REMOVE_AT(pool->avail, pool->num_avail, i);
+            entry->refs = 1;
+            return &entry->ref;
+        }
     }
 
-    ra_tex_free(ra, tex);
+    // No new image => allocate one
     struct ra_tex_params params = {
         .dimensions = 2,
         .w = w,
         .h = h,
         .d = 1,
-        .format = fmt,
+        .format = pool->fmt,
         .src_linear = true,
         .render_src = true,
         .render_dst = true,
@@ -198,11 +255,48 @@ bool ra_tex_resize(struct ra *ra, struct mp_log *log, struct ra_tex **tex,
         .blit_src = true,
     };
 
-    *tex = ra_tex_create(ra, &params);
-    if (!*tex)
-        mp_err(log, "Error: texture could not be created.\n");
+    MP_VERBOSE(pool->ra, "Creating new %dx%d texture.\n", w, h);
+    struct ra_tex *tex = ra_tex_create(pool->ra, &params);
+    if (!tex) {
+        MP_FATAL(pool->ra, "Could not create texture!\n");
+        abort(); // OOM
+    }
 
-    return *tex;
+    struct ra_tex_entry *entry = talloc_zero(NULL, struct ra_tex_entry);
+    entry->pool = pool;
+    entry->refs = 1;
+    entry->ref.tex = tex;
+    entry->ref.priv = entry;
+
+    return &entry->ref;
+}
+
+struct ra_tex_ref *ra_tex_ref_dup(struct ra_tex_ref *ref)
+{
+    if (!ref)
+        return NULL;
+
+    struct ra_tex_entry *entry = ref->priv;
+    assert(entry->refs > 0);
+    entry->refs++;
+    return ref;
+}
+
+void ra_tex_ref_free(struct ra_tex_ref **ref)
+{
+    if (!*ref)
+        return;
+
+    struct ra_tex_entry *entry = (*ref)->priv;
+    struct ra_tex_pool *pool = entry->pool;
+
+    assert(entry->refs > 0);
+    if (--entry->refs == 0) {
+        entry->age = 0;
+        MP_TARRAY_APPEND(pool, pool->avail, pool->num_avail, entry);
+    }
+
+    *ref = NULL;
 }
 
 struct timer_pool {

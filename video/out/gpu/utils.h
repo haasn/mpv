@@ -89,12 +89,31 @@ struct ra_buf *ra_buf_pool_get(struct ra *ra, struct ra_buf_pool *pool,
 bool ra_tex_upload_pbo(struct ra *ra, struct ra_buf_pool *pbo,
                        const struct ra_tex_upload_params *params);
 
+// A pool of images, from which you can draw temporary references. Freeing
+// a tex_pool which still has references is undefined behavior.
+struct ra_tex_pool *ra_tex_pool_alloc(struct ra *ra, const struct ra_format *fmt);
+void ra_tex_pool_free(struct ra_tex_pool **pool);
+
+// For garbage collection: should be called once per frame
+void ra_tex_pool_gc_tick(struct ra_tex_pool *pool);
+
+struct ra_tex_ref {
+    struct ra_tex *tex;
+    void *priv;
+};
+
+// Texture references are internally ref-counted. Once the reference count hits
+// zero, they will be automatically released back to the pool, and the contents
+// of the ra_tex become undefined
+struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool, int w, int h);
+
+// These may safely be called on NULL refs
+struct ra_tex_ref *ra_tex_ref_dup(struct ra_tex_ref *ref);
+void ra_tex_ref_free(struct ra_tex_ref **ref);
+
 // Layout rules for GLSL's packing modes
 struct ra_layout std140_layout(struct ra_renderpass_input *inp);
 struct ra_layout std430_layout(struct ra_renderpass_input *inp);
-
-bool ra_tex_resize(struct ra *ra, struct mp_log *log, struct ra_tex **tex,
-                   int w, int h, const struct ra_format *fmt);
 
 // A wrapper around ra_timer that does result pooling, averaging etc.
 struct timer_pool;
