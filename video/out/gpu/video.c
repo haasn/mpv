@@ -86,6 +86,9 @@ struct texplane {
     struct ra_tex *tex;
     int w, h;
     bool flipped;
+    // for swdec:
+    struct ra_tex_ref *ref;
+    struct ra_tex_params params;
 };
 
 struct video_image {
@@ -220,6 +223,7 @@ struct gl_video {
     bool dumb_mode;
     bool forced_dumb_mode;
 
+    const struct ra_format *fbo_format;
     struct ra_tex_ref *output_cache;
     struct ra_tex *vdpau_deinterleave_tex[2];
     struct ra_buf *hdr_peak_ssbo;
@@ -496,7 +500,7 @@ static void reinit_osd(struct gl_video *p)
     mpgl_osd_destroy(p->osd);
     p->osd = NULL;
     if (p->osd_state)
-        p->osd = mpgl_osd_init(p->ra, p->log, p->osd_state);
+        p->osd = mpgl_osd_init(p->ra, p->texpool, p->log, p->osd_state);
 }
 
 static void uninit_rendering(struct gl_video *p)
@@ -879,8 +883,7 @@ static void init_video(struct gl_video *p)
 
             plane->w = mp_image_plane_w(&layout, n);
             plane->h = mp_image_plane_h(&layout, n);
-
-            struct ra_tex_params params = {
+            plane->params = (struct ra_tex_params) {
                 .dimensions = 2,
                 .w = plane->w + p->opts.tex_pad_x,
                 .h = plane->h + p->opts.tex_pad_y,
@@ -893,11 +896,7 @@ static void init_video(struct gl_video *p)
             };
 
             MP_VERBOSE(p, "Texture for plane %d: %dx%d\n", n,
-                       params.w, params.h);
-
-            plane->tex = ra_tex_create(p->ra, &params);
-            if (!plane->tex)
-                abort(); // OOM
+                       plane->params.w, plane->params.h);
 
             p->use_integer_conversion |= format->ctype == RA_CTYPE_UINT;
         }
@@ -912,6 +911,8 @@ static void init_video(struct gl_video *p)
 static void unmap_current_image(struct gl_video *p)
 {
     struct video_image *vimg = &p->image;
+    for (int i = 0; i < MP_ARRAY_SIZE(vimg->planes); i++)
+        ra_tex_ref_free(&vimg->planes[i].ref);
 
     if (vimg->hwdec_mapped) {
         assert(p->hwdec_active && p->hwdec_mapper);
@@ -984,17 +985,11 @@ static void unmap_overlay(struct gl_video *p)
 static void uninit_video(struct gl_video *p)
 {
     uninit_rendering(p);
-    ra_tex_pool_free(&p->texpool);
 
     struct video_image *vimg = &p->image;
 
     unmap_overlay(p);
     unref_current_image(p);
-
-    for (int n = 0; n < p->plane_count; n++) {
-        struct texplane *plane = &vimg->planes[n];
-        ra_tex_free(p->ra, &plane->tex);
-    }
     *vimg = (struct video_image){0};
 
     // Invalidate image_params to ensure that gl_video_config() will call
@@ -1210,7 +1205,19 @@ static void finish_pass_fbo(struct gl_video *p, struct ra_fbo fbo,
 //       used for rasterization
 static struct ra_tex_ref *finish_pass_pool(struct gl_video *p, int w, int h)
 {
-    struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, w, h);
+    struct ra_tex_params params = {
+        .dimensions = 2,
+        .w = w,
+        .h = h,
+        .d = 1,
+        .format = p->fbo_format,
+        .render_src = true,
+        .src_linear = true,
+        .storage_dst = p->pass_compute.active,
+        .render_dst = !p->pass_compute.active,
+    };
+
+    struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, &params);
 
     if (p->pass_compute.active) {
         gl_sc_uniform_image2D_wo(p->sc, "out_image", ref->tex);
@@ -3006,9 +3013,7 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
 void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame,
                            struct ra_fbo fbo)
 {
-    if (p->texpool)
-        ra_tex_pool_gc_tick(p->texpool);
-
+    ra_tex_pool_gc_tick(p->texpool);
     struct mp_rect target_rc = {0, 0, fbo.tex->params.w, fbo.tex->params.h};
 
     p->broken_frame = false;
@@ -3068,9 +3073,16 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame,
                 if (frame->num_vsyncs > 1 && frame->display_synced &&
                     !p->dumb_mode && (p->ra->caps & RA_CAP_BLIT))
                 {
-                    p->output_cache = ra_tex_pool_get(p->texpool,
-                                                      fbo.tex->params.w,
-                                                      fbo.tex->params.h);
+                    struct ra_tex_params params = {
+                        .dimensions = 2,
+                        .w = fbo.tex->params.w,
+                        .h = fbo.tex->params.h,
+                        .d = 1,
+                        .format = fbo.tex->params.format,
+                        .render_dst = true,
+                        .blit_src = true,
+                    };
+                    p->output_cache = ra_tex_pool_get(p->texpool, &params);
                     dest_fbo = (struct ra_fbo) { p->output_cache->tex };
                 }
                 pass_draw_to_screen(p, dest_fbo);
@@ -3233,7 +3245,8 @@ static void reinterleave_vdpau(struct gl_video *p,
 }
 
 // Returns false on failure.
-static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t id)
+static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi,
+                              uint64_t id)
 {
     struct video_image *vimg = &p->image;
 
@@ -3293,8 +3306,9 @@ static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi, uint64_t
     timer_pool_start(p->upload_timer);
     for (int n = 0; n < p->plane_count; n++) {
         struct texplane *plane = &vimg->planes[n];
-
         plane->flipped = mpi->stride[0] < 0;
+        plane->ref = ra_tex_pool_get(p->texpool, &plane->params);
+        plane->tex = plane->ref->tex;
 
         struct ra_tex_upload_params params = {
             .tex = plane->tex,
@@ -3339,21 +3353,25 @@ error:
     return false;
 }
 
-// Simultaneously tests for and initializes FBO support (p->texpool)
-static bool init_texpool(struct gl_video *p, const struct ra_format *fmt)
+static bool test_fbo(struct gl_video *p, const struct ra_format *fmt)
 {
-    ra_tex_pool_free(&p->texpool);
-    p->texpool = ra_tex_pool_alloc(p->ra, fmt);
-    if (!p->texpool)
-        return false;
-
     MP_VERBOSE(p, "Testing FBO format %s\n", fmt->name);
-    struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, 16, 16);
+
+    struct ra_tex_params params = {
+        .dimensions = 2,
+        .w = 16,
+        .h = 16,
+        .format = fmt,
+        // Test all of the features we're likely to need
+        .render_src = true,
+        .src_linear = true,
+        .render_dst = true,
+        .storage_dst = true,
+    };
+
+    struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, &params);
     bool success = !!ref;
     ra_tex_ref_free(&ref);
-
-    if (!success)
-        ra_tex_pool_free(&p->texpool);
 
     return success;
 }
@@ -3406,14 +3424,16 @@ static void check_gl_features(struct gl_video *p)
     const char **fbo_fmts = user_fbo_fmts[0] && strcmp(user_fbo_fmts[0], "auto")
                           ? user_fbo_fmts : auto_fbo_fmts;
     bool have_fbo = false;
+    p->fbo_format = NULL;
     for (int n = 0; fbo_fmts[n]; n++) {
         const char *fmt = fbo_fmts[n];
         const struct ra_format *f = ra_find_named_format(p->ra, fmt);
         if (!f && fbo_fmts == user_fbo_fmts)
             MP_WARN(p, "FBO format '%s' not found!\n", fmt);
-        if (f && f->renderable && f->linear_filter && init_texpool(p, f)) {
+        if (f && f->renderable && f->linear_filter && test_fbo(p, f)) {
             MP_VERBOSE(p, "Using FBO format %s.\n", f->name);
             have_fbo = true;
+            p->fbo_format = f;
             break;
         }
     }
@@ -3549,6 +3569,7 @@ void gl_video_uninit(struct gl_video *p)
     // Should all have been unreffed already.
     assert(!p->num_dr_buffers);
 
+    ra_tex_pool_free(&p->texpool);
     talloc_free(p);
 }
 
@@ -3615,6 +3636,7 @@ struct gl_video *gl_video_init(struct ra *ra, struct mp_log *log,
     struct gl_video *p = talloc_ptrtype(NULL, p);
     *p = (struct gl_video) {
         .ra = ra,
+        .texpool = ra_tex_pool_alloc(ra),
         .global = g,
         .log = log,
         .sc = gl_sc_create(ra, g, log),

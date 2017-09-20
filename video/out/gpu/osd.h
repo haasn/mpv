@@ -8,8 +8,8 @@
 #include "shader_cache.h"
 #include "sub/osd.h"
 
-struct mpgl_osd *mpgl_osd_init(struct ra *ra, struct mp_log *log,
-                               struct osd_state *osd);
+struct mpgl_osd *mpgl_osd_init(struct ra *ra, struct ra_tex_pool *pool,
+                               struct mp_log *log, struct osd_state *osd);
 void mpgl_osd_destroy(struct mpgl_osd *ctx);
 
 void mpgl_osd_generate(struct mpgl_osd *ctx, struct mp_osd_res res, double pts,

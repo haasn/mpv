@@ -372,6 +372,12 @@ struct ra_fns {
     // become undefined.
     void (*tex_invalidate)(struct ra *ra, struct ra_tex *tex);
 
+    // Returns whether or not a texture is currently "free to use". Writing to
+    // an image that's in use is undefined behavior. (Note: tex_invalidate may
+    // always be called, even on in-use images). Optional, if NULL then all
+    // textures are always available.
+    bool (*tex_poll)(struct ra *ra, struct ra_tex *tex);
+
     // Create a buffer. This can be used as a persistently mapped buffer,
     // a uniform buffer, a shader storage buffer or possibly others.
     // Not all usage types must be supported; may return NULL if unavailable.
@@ -387,10 +393,10 @@ struct ra_fns {
     void (*buf_update)(struct ra *ra, struct ra_buf *buf, ptrdiff_t offset,
                        const void *data, size_t size);
 
-    // Returns if a buffer is currently "in use" or not. Updating the contents
-    // of a buffer (via buf_update or writing to buf->data) while it is still
-    // in use is an error and may result in graphical corruption. Optional, if
-    // NULL then all buffers are always usable.
+    // Returns if a buffer is currently "free to use" or not. Updating the
+    // contents of a buffer (via buf_update or writing to buf->data) while it
+    // is still in use is an error and may result in graphical corruption.
+    // Optional, if NULL then all buffers are always usable.
     bool (*buf_poll)(struct ra *ra, struct ra_buf *buf);
 
     // Returns the layout requirements of a uniform buffer element. Optional,

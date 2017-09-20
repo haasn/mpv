@@ -53,7 +53,7 @@ static const struct ra_renderpass_input vertex_vao[] = {
 struct mpgl_osd_part {
     enum sub_bitmap_format format;
     int change_id;
-    struct ra_tex *texture;
+    struct ra_tex_ref *texture;
     int w, h;
     int num_subparts;
     int prev_num_subparts;
@@ -66,6 +66,7 @@ struct mpgl_osd {
     struct mp_log *log;
     struct osd_state *osd;
     struct ra *ra;
+    struct ra_tex_pool *pool;
     struct mpgl_osd_part *parts[MAX_OSD_PARTS];
     const struct ra_format *fmt_table[SUBBITMAP_COUNT];
     bool formats[SUBBITMAP_COUNT];
@@ -76,14 +77,15 @@ struct mpgl_osd {
     void *scratch;
 };
 
-struct mpgl_osd *mpgl_osd_init(struct ra *ra, struct mp_log *log,
-                               struct osd_state *osd)
+struct mpgl_osd *mpgl_osd_init(struct ra *ra, struct ra_tex_pool *pool,
+                               struct mp_log *log, struct osd_state *osd)
 {
     struct mpgl_osd *ctx = talloc_ptrtype(NULL, ctx);
     *ctx = (struct mpgl_osd) {
         .log = log,
         .osd = osd,
         .ra = ra,
+        .pool = pool,
         .change_flag = true,
         .scratch = talloc_zero_size(ctx, 1),
     };
@@ -107,7 +109,7 @@ void mpgl_osd_destroy(struct mpgl_osd *ctx)
 
     for (int n = 0; n < MAX_OSD_PARTS; n++) {
         struct mpgl_osd_part *p = ctx->parts[n];
-        ra_tex_free(ctx->ra, &p->texture);
+        ra_tex_ref_free(&p->texture);
     }
     talloc_free(ctx);
 }
@@ -129,54 +131,41 @@ static bool upload_osd(struct mpgl_osd *ctx, struct mpgl_osd_part *osd,
 
     assert(imgs->packed);
 
-    int req_w = next_pow2(imgs->packed_w);
-    int req_h = next_pow2(imgs->packed_h);
+    osd->format = imgs->format;
+    osd->w = FFMAX(32, next_pow2(imgs->packed_w));
+    osd->h = FFMAX(32, next_pow2(imgs->packed_h));
+
+    if (osd->w > ra->max_texture_wh || osd->h > ra->max_texture_wh) {
+        MP_ERR(ctx, "OSD bitmaps do not fit on a surface with the maximum "
+               "supported size %dx%d.\n", ra->max_texture_wh,
+               ra->max_texture_wh);
+        goto done;
+    }
 
     const struct ra_format *fmt = ctx->fmt_table[imgs->format];
     assert(fmt);
 
-    if (!osd->texture || req_w > osd->w || req_h > osd->h ||
-        osd->format != imgs->format)
-    {
-        ra_tex_free(ra, &osd->texture);
+    struct ra_tex_params tex_params = {
+        .dimensions = 2,
+        .w = osd->w,
+        .h = osd->h,
+        .d = 1,
+        .format = fmt,
+        .render_src = true,
+        .host_mutable = true,
+    };
 
-        osd->format = imgs->format;
-        osd->w = FFMAX(32, req_w);
-        osd->h = FFMAX(32, req_h);
-
-        MP_VERBOSE(ctx, "Reallocating OSD texture to %dx%d.\n", osd->w, osd->h);
-
-        if (osd->w > ra->max_texture_wh || osd->h > ra->max_texture_wh) {
-            MP_ERR(ctx, "OSD bitmaps do not fit on a surface with the maximum "
-                   "supported size %dx%d.\n", ra->max_texture_wh,
-                   ra->max_texture_wh);
-            goto done;
-        }
-
-        struct ra_tex_params params = {
-            .dimensions = 2,
-            .w = osd->w,
-            .h = osd->h,
-            .d = 1,
-            .format = fmt,
-            .render_src = true,
-            .src_linear = true,
-            .host_mutable = true,
-        };
-        osd->texture = ra_tex_create(ra, &params);
-        if (!osd->texture)
-            goto done;
-    }
-
-    struct ra_tex_upload_params params = {
-        .tex = osd->texture,
+    ra_tex_ref_free(&osd->texture);
+    osd->texture = ra_tex_pool_get(ctx->pool, &tex_params);
+    struct ra_tex_upload_params ul_params = {
+        .tex = osd->texture->tex,
         .src = imgs->packed->planes[0],
         .invalidate = true,
         .rc = &(struct mp_rect){0, 0, imgs->packed_w, imgs->packed_h},
         .stride = imgs->packed->stride[0],
     };
 
-    ok = ra->fns->tex_upload(ra, &params);
+    ok = ra->fns->tex_upload(ra, &ul_params);
 
 done:
     return ok;
@@ -216,7 +205,7 @@ bool mpgl_osd_draw_prepare(struct mpgl_osd *ctx, int index,
     if (!fmt || !part->num_subparts)
         return false;
 
-    gl_sc_uniform_texture(sc, "osdtex", part->texture);
+    gl_sc_uniform_texture(sc, "osdtex", part->texture->tex);
     switch (fmt) {
     case SUBBITMAP_RGBA: {
         GLSL(color = texture(osdtex, texcoord).bgra;)
