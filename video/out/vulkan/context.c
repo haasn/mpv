@@ -124,8 +124,13 @@ struct priv {
     int last_imgidx;          // the image index last acquired (for submit)
 };
 
-struct mpvk_ctx *ra_vk_ctx_get_vk(struct ra_ctx *ctx)
+static const struct ra_swchain_fns vulkan_swchain;
+
+struct mpvk_ctx *ra_vk_ctx_get(struct ra_ctx *ctx)
 {
+    if (ctx->swchain->fns != &vulkan_swchain)
+        return NULL;
+
     struct priv *p = ctx->swchain->priv;
     return p->vk;
 }

@@ -1,8 +1,8 @@
 #include "video/out/gpu/spirv.h"
 
 #include "common.h"
+#include "context.h"
 #include "utils.h"
-#include "ra_vk.h"
 
 static bool nv_glsl_compile(struct spirv_compiler *spirv, void *tactx,
                             enum glsl_shader type, const char *glsl,
@@ -15,7 +15,7 @@ static bool nv_glsl_compile(struct spirv_compiler *spirv, void *tactx,
 
 static bool nv_glsl_init(struct ra_ctx *ctx)
 {
-    struct mpvk_ctx *vk = ra_vk_get(ctx->ra);
+    struct mpvk_ctx *vk = ra_vk_ctx_get(ctx);
     if (!vk)
         return false;
 
