@@ -91,7 +91,9 @@ bool ra_tex_upload_pbo(struct ra *ra, struct ra_buf_pool *pbo,
 
 // A pool of images, from which you can draw temporary references. Freeing
 // a tex_pool which still has references is undefined behavior.
-struct ra_tex_pool *ra_tex_pool_alloc(struct ra *ra, const struct ra_format *fmt);
+// The params struct is used to determine what the resulting images will look
+// like. (Note: the w/h/d fields, as well as initial_data, are ignored.)
+struct ra_tex_pool *ra_tex_pool_alloc(struct ra *ra);
 void ra_tex_pool_free(struct ra_tex_pool **pool);
 
 // For garbage collection: should be called once per frame
@@ -104,8 +106,9 @@ struct ra_tex_ref {
 
 // Texture references are internally ref-counted. Once the reference count hits
 // zero, they will be automatically released back to the pool, and the contents
-// of the ra_tex become undefined
-struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool, int w, int h);
+// of the ra_tex become undefined.
+struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool,
+                                   const struct ra_tex_params *params);
 
 // These may safely be called on NULL refs
 struct ra_tex_ref *ra_tex_ref_dup(struct ra_tex_ref *ref);

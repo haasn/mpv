@@ -311,9 +311,10 @@ static VkResult vk_create_render_pass(VkDevice dev, const struct ra_format *fmt,
 struct ra_tex_vk {
     bool external_img;
     enum queue_type upload_queue;
+    struct vk_memslice mem;
     VkImageType type;
     VkImage img;
-    struct vk_memslice mem;
+    bool inuse;
     // for sampling
     VkImageView view;
     VkSampler sampler;
@@ -327,6 +328,11 @@ struct ra_tex_vk {
     VkPipelineStageFlagBits current_stage;
     VkAccessFlagBits current_access;
 };
+
+static void tex_free_to_use(void *priv, struct ra_tex_vk *tex_vk)
+{
+    tex_vk->inuse = false;
+}
 
 // Small helper to ease image barrier creation. if `discard` is set, the contents
 // of the image will be undefined after the barrier
@@ -362,6 +368,9 @@ static void tex_barrier(struct vk_cmd *cmd, struct ra_tex_vk *tex_vk,
     tex_vk->current_stage = newStage;
     tex_vk->current_layout = newLayout;
     tex_vk->current_access = newAccess;
+    tex_vk->inuse = true;
+
+    vk_cmd_callback(cmd, (vk_cb) tex_free_to_use, NULL, tex_vk);
 }
 
 static void vk_tex_destroy(struct ra *ra, struct ra_tex *tex)
@@ -641,6 +650,33 @@ struct ra_tex *ra_vk_wrap_swchain_img(struct ra *ra, VkImage vkimg,
 error:
     vk_tex_destroy(ra, tex);
     return NULL;
+}
+
+static bool vk_tex_poll(struct ra *ra, struct ra_tex *tex)
+{
+    struct mpvk_ctx *vk = ra_vk_get(ra);
+    struct ra_tex_vk *tex_vk = tex->priv;
+    struct ra_tex_params params = tex->params;
+
+    // There are a few special cases in which we can guarantee that a texture
+    // is always usable based on the ordering guarantees provided by VkQueues.
+    // To check this, first assume the image is free to use and then exclude
+    // all of the cases that *don't* apply.
+    bool safe = true;
+
+    // If using async transfer, it's never safe to re-use an image early for
+    // uploads, since another thread might still be rendering from it.
+    if (params.host_mutable && vk->pool_transfer)
+        safe = false;
+
+    // If we might be rendering from multiple graphics queues, the image is
+    // not safe to reuse for GRAPHICS-type operations.
+    if (vk->pool->qcount > 1) {
+        if (params.render_dst || params.storage_dst || params.blit_dst)
+            safe = false;
+    }
+
+    return safe || !tex_vk->inuse;
 }
 
 // For ra_buf.priv
@@ -1731,6 +1767,7 @@ static struct ra_fns ra_fns_vk = {
     .tex_destroy            = vk_tex_destroy_lazy,
     .tex_upload             = vk_tex_upload,
     .tex_invalidate         = vk_tex_invalidate,
+    .tex_poll               = vk_tex_poll,
     .buf_create             = vk_buf_create,
     .buf_destroy            = vk_buf_destroy_lazy,
     .buf_update             = vk_buf_update,
