@@ -3361,6 +3361,7 @@ static bool test_fbo(struct gl_video *p, const struct ra_format *fmt)
         .dimensions = 2,
         .w = 16,
         .h = 16,
+        .d = 1,
         .format = fmt,
         // Test all of the features we're likely to need
         .render_src = true,
