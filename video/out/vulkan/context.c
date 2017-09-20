@@ -418,7 +418,7 @@ static int color_depth(struct ra_swchain *sw)
     return bits;
 }
 
-static struct ra_tex *start_frame(struct ra_swchain *sw)
+static bool start_frame(struct ra_swchain *sw, struct ra_fbo *out_fbo)
 {
     struct priv *p = sw->priv;
     struct mpvk_ctx *vk = p->vk;
@@ -433,10 +433,11 @@ static struct ra_tex *start_frame(struct ra_swchain *sw)
     VK_ASSERT(res, "Failed acquiring swapchain image");
 
     p->last_imgidx = imgidx;
-    return p->images[imgidx];
+    *out_fbo = (struct ra_fbo){ p->images[imgidx] };
+    return true;
 
 error:
-    return NULL;
+    return false;
 }
 
 static bool submit_frame(struct ra_swchain *sw, const struct vo_frame *frame)

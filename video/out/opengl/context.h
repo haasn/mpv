@@ -48,6 +48,6 @@ void ra_gl_ctx_resize(struct ra_swchain *sw, int w, int h, int fbo);
 int ra_gl_ctx_color_depth(struct ra_swchain *sw);
 struct mp_image *ra_gl_ctx_screenshot(struct ra_swchain *sw);
 void ra_gl_ctx_update_length(struct ra_swchain *sw, int depth);
-struct ra_tex *ra_gl_ctx_start_frame(struct ra_swchain *sw);
+bool ra_gl_ctx_start_frame(struct ra_swchain *sw, struct ra_fbo *out_fbo);
 bool ra_gl_ctx_submit_frame(struct ra_swchain *sw, const struct vo_frame *frame);
 void ra_gl_ctx_swap_buffers(struct ra_swchain *sw);

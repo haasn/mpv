@@ -152,7 +152,6 @@ bool ra_gl_ctx_init(struct ra_ctx *ctx, GL *gl, struct ra_gl_ctx_params params)
 {
     struct ra_swchain *sw = ctx->swchain = talloc_zero(NULL, struct ra_swchain);
     sw->ctx = ctx;
-    sw->flip_v = !params.flipped; // OpenGL framebuffers are normally inverted
     sw->fns = &ra_gl_swchain_fns;
 
     struct priv *p = sw->priv = talloc_zero(sw, struct priv);
@@ -250,10 +249,12 @@ void ra_gl_ctx_update_length(struct ra_swchain *sw, int depth)
     p->swchain_depth = depth;
 }
 
-struct ra_tex *ra_gl_ctx_start_frame(struct ra_swchain *sw)
+bool ra_gl_ctx_start_frame(struct ra_swchain *sw, struct ra_fbo *out_fbo)
 {
     struct priv *p = sw->priv;
-    return p->wrapped_fb;
+    out_fbo->tex = p->wrapped_fb;
+    out_fbo->flip = !p->params.flipped; // OpenGL FBs are normally flipped
+    return true;
 }
 
 bool ra_gl_ctx_submit_frame(struct ra_swchain *sw, const struct vo_frame *frame)

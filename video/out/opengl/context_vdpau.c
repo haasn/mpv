@@ -356,7 +356,7 @@ uninit:
     return false;
 }
 
-static struct ra_tex *vdpau_start_frame(struct ra_swchain *sw)
+static bool vdpau_start_frame(struct ra_swchain *sw, struct ra_fbo *out_fbo)
 {
     struct priv *p = sw->ctx->priv;
     struct vo *vo = sw->ctx->vo;
@@ -375,7 +375,7 @@ static struct ra_tex *vdpau_start_frame(struct ra_swchain *sw)
     surf->mapped = true;
 
     ra_gl_ctx_resize(sw, surf->w, surf->h, surf->fbo);
-    return ra_gl_ctx_start_frame(sw);
+    return ra_gl_ctx_start_frame(sw, out_fbo);
 }
 
 static bool vdpau_submit_frame(struct ra_swchain *sw, const struct vo_frame *frame)

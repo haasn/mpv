@@ -236,7 +236,7 @@ int mpv_opengl_cb_draw(mpv_opengl_cb_context *ctx, int fbo, int vp_w, int vp_h)
         return MPV_ERROR_UNSUPPORTED;
     }
 
-    struct fbodst target = {
+    struct ra_fbo target = {
         .tex = ra_create_wrapped_fb(ctx->ra, fbo, vp_w, abs(vp_h)),
         .flip = vp_h < 0,
     };

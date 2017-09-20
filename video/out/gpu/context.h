@@ -57,16 +57,19 @@ struct ra_swchain {
     struct ra_ctx *ctx;
     struct priv *priv;
     const struct ra_swchain_fns *fns;
+};
 
-    bool flip_v; // flip the rendered image vertically (set by the swapchain)
+// Represents a framebuffer / render target
+struct ra_fbo {
+    struct ra_tex *tex;
+    bool flip; // rendering needs to be inverted
 };
 
 struct ra_swchain_fns {
     // Gets the current framebuffer depth in bits (0 if unknown). Optional.
     int (*color_depth)(struct ra_swchain *sw);
 
-    // Retrieves a screenshot of the framebuffer. These are always the right
-    // side up, regardless of ra_swchain->flip_v. Optional.
+    // Retrieves a screenshot of the framebuffer. Optional.
     struct mp_image *(*screenshot)(struct ra_swchain *sw);
 
     // Resizes the number of images in the swapchain. Like opts.swchain_depth,
@@ -77,7 +80,7 @@ struct ra_swchain_fns {
     // followed by submit_frame, to submit the rendered frame. This function
     // can also fail sporadically, and such errors should be ignored unless
     // they persist.
-    struct ra_tex *(*start_frame)(struct ra_swchain *sw);
+    bool (*start_frame)(struct ra_swchain *sw, struct ra_fbo *out_fbo);
 
     // Present the frame. Issued in lockstep with start_frame, with rendering
     // commands in between. The `frame` is just there for timing data, for
