@@ -367,6 +367,11 @@ struct ra_fns {
     // Returns whether successful.
     bool (*tex_upload)(struct ra *ra, const struct ra_tex_upload_params *params);
 
+    // Invalidate the contents of a texture. This can be used on all textures,
+    // and may be a no-op. After this operation, the contents of the texture
+    // become undefined.
+    void (*tex_invalidate)(struct ra *ra, struct ra_tex *tex);
+
     // Create a buffer. This can be used as a persistently mapped buffer,
     // a uniform buffer, a shader storage buffer or possibly others.
     // Not all usage types must be supported; may return NULL if unavailable.

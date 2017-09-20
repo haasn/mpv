@@ -387,6 +387,14 @@ static void vk_tex_destroy(struct ra *ra, struct ra_tex *tex)
 
 MAKE_LAZY_DESTRUCTOR(vk_tex_destroy, struct ra_tex);
 
+static void vk_tex_invalidate(struct ra *ra, struct ra_tex *tex)
+{
+    struct ra_tex_vk *tex_vk = tex->priv;
+    tex_vk->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    tex_vk->current_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    tex_vk->current_access = 0;
+}
+
 // Initializes non-VkImage values like the image view, samplers, etc.
 static bool vk_init_image(struct ra *ra, struct ra_tex *tex)
 {
@@ -395,10 +403,7 @@ static bool vk_init_image(struct ra *ra, struct ra_tex *tex)
     struct ra_tex_params *params = &tex->params;
     struct ra_tex_vk *tex_vk = tex->priv;
     assert(tex_vk->img);
-
-    tex_vk->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    tex_vk->current_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    tex_vk->current_access = 0;
+    vk_tex_invalidate(ra, tex);
 
     if (params->render_src || params->render_dst) {
         static const VkImageViewType viewType[] = {
@@ -1725,6 +1730,7 @@ static struct ra_fns ra_fns_vk = {
     .tex_create             = vk_tex_create,
     .tex_destroy            = vk_tex_destroy_lazy,
     .tex_upload             = vk_tex_upload,
+    .tex_invalidate         = vk_tex_invalidate,
     .buf_create             = vk_buf_create,
     .buf_destroy            = vk_buf_destroy_lazy,
     .buf_update             = vk_buf_update,

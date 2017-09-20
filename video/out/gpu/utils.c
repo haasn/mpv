@@ -293,6 +293,7 @@ void ra_tex_ref_free(struct ra_tex_ref **ref)
     assert(entry->refs > 0);
     if (--entry->refs == 0) {
         entry->age = 0;
+        pool->ra->fns->tex_invalidate(pool->ra, entry->ref.tex);
         MP_TARRAY_APPEND(pool, pool->avail, pool->num_avail, entry);
     }
 

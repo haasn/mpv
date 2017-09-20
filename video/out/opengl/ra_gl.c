@@ -497,6 +497,23 @@ static bool gl_tex_upload(struct ra *ra,
     return true;
 }
 
+static void gl_tex_invalidate(struct ra *ra, struct ra_tex *tex)
+{
+    GL *gl = ra_gl_get(ra);
+    struct ra_tex_gl *tex_gl = tex->priv;
+
+    if (tex_gl->texture && gl->InvalidateTexImage)
+        gl->InvalidateTexImage(tex_gl->texture, 0);
+
+    if (gl->InvalidateFramebuffer) {
+        gl->BindFramebuffer(GL_FRAMEBUFFER, tex_gl->fbo);
+        GLenum fb = tex_gl->fbo ? GL_COLOR_ATTACHMENT0 : GL_COLOR;
+        gl->InvalidateFramebuffer(GL_FRAMEBUFFER, 1, &fb);
+        gl->BindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+}
+
 static void gl_buf_destroy(struct ra *ra, struct ra_buf *buf)
 {
     if (!buf)
@@ -1110,6 +1127,7 @@ static struct ra_fns ra_fns_gl = {
     .tex_create             = gl_tex_create,
     .tex_destroy            = gl_tex_destroy,
     .tex_upload             = gl_tex_upload,
+    .tex_invalidate         = gl_tex_invalidate,
     .buf_create             = gl_buf_create,
     .buf_destroy            = gl_buf_destroy,
     .buf_update             = gl_buf_update,
