@@ -167,7 +167,7 @@ struct ra_layout std430_layout(struct ra_renderpass_input *inp)
     };
 }
 
-#define RA_TEX_ENTRY_MAX_AGE 10
+#define RA_TEX_ENTRY_MAX_AGE 1000
 
 struct ra_tex_entry {
     struct ra_tex_pool *pool;
