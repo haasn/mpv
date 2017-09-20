@@ -1326,8 +1326,16 @@ static bool tex_needed(struct gl_video *p, const char *name)
 
     for (int i = 0; i < p->tex_hook_num; i++) {
         struct tex_hook *hook = &p->tex_hooks[i];
+
         for (int b = 0; b < TEXUNIT_VIDEO_NUM; b++) {
             if (hook->bind_tex[b] && strcmp(hook->bind_tex[b], name) == 0)
+                return true;
+        }
+
+        // A texture being hooked implies an indirect dependency, because
+        // of //!BIND HOOKED
+        for (int h = 0; h < SHADER_MAX_HOOKS; h++) {
+            if (hook->hook_tex[h] && strcmp(hook->hook_tex[h], name) == 0)
                 return true;
         }
     }
@@ -1376,6 +1384,8 @@ static void saved_img_store(struct gl_video *p, const char *name,
 static bool pass_hook_setup_binds(struct gl_video *p, const char *name,
                                   struct image img, struct tex_hook *hook)
 {
+    int old_bind_num = p->pass_img_num;
+
     for (int t = 0; t < TEXUNIT_VIDEO_NUM; t++) {
         char *bind_name = (char *)hook->bind_tex[t];
 
@@ -1406,7 +1416,9 @@ static bool pass_hook_setup_binds(struct gl_video *p, const char *name,
             // Clean up texture bindings and move on to the next hook
             MP_DBG(p, "Skipping hook on %s due to no texture named %s.\n",
                    name, bind_name);
-            p->pass_img_num -= t;
+            for (int i = old_bind_num; i < p->pass_img_num; i++)
+                image_unref(&p->pass_img[i]);
+            p->pass_img_num = old_bind_num;
             return false;
         }
 
@@ -2692,6 +2704,7 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
     p->texture_offset = identity_trans;
     p->components = 0;
     p->use_linear = false;
+    assert(p->saved_img_num == 0);
 
     // try uploading the frame
     if (!pass_upload_image(p, mpi, id))
