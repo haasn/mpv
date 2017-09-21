@@ -277,12 +277,13 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
         goto error;
     if (!spirv_compiler_init(ctx))
         goto error;
+    vk->spirv = ctx->spirv;
     if (!mpvk_pick_surface_format(vk))
         goto error;
     if (!mpvk_device_init(vk, ctx->opts.swchain_depth))
         goto error;
 
-    ctx->ra = ra_create_vk(vk, ctx->log, ctx->spirv);
+    ctx->ra = ra_create_vk(vk, ctx->log);
     if (!ctx->ra)
         goto error;
 

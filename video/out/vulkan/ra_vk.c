@@ -15,7 +15,6 @@ enum queue_type {
 // For ra.priv
 struct ra_vk {
     struct mpvk_ctx *vk;
-    struct spirv_compiler *spirv;
     struct ra_tex *clear_tex; // stupid hack for clear()
     struct vk_cmd *cmds[QUEUE_TYPE_COUNT]; // currently recording cmds
 };
@@ -207,8 +206,7 @@ error:
 
 static struct ra_fns ra_fns_vk;
 
-struct ra *ra_create_vk(struct mpvk_ctx *vk, struct mp_log *log,
-                        struct spirv_compiler *spirv)
+struct ra *ra_create_vk(struct mpvk_ctx *vk, struct mp_log *log)
 {
     assert(vk->dev);
     assert(vk->alloc);
@@ -219,10 +217,9 @@ struct ra *ra_create_vk(struct mpvk_ctx *vk, struct mp_log *log,
 
     struct ra_vk *p = ra->priv = talloc_zero(ra, struct ra_vk);
     p->vk = vk;
-    p->spirv = spirv;
 
-    ra->caps |= spirv->ra_caps;
-    ra->glsl_version = spirv->glsl_version;
+    ra->caps |= vk->spirv->ra_caps;
+    ra->glsl_version = vk->spirv->glsl_version;
     ra->glsl_vulkan = true;
     ra->max_shmem = vk->limits.maxComputeSharedMemorySize;
     ra->max_pushc_size = vk->limits.maxPushConstantsSize;
@@ -1057,11 +1054,11 @@ static VkResult vk_compile_glsl(struct ra *ra, void *tactx,
                                 enum glsl_shader type, const char *glsl,
                                 struct bstr *spirv)
 {
-    struct ra_vk *p = ra->priv;
+    struct mpvk_ctx *vk = ra_vk_get(ra);
     VkResult ret = VK_SUCCESS;
     int msgl = MSGL_DEBUG;
 
-    if (!p->spirv->fns->compile_glsl(p->spirv, tactx, type, glsl, spirv)) {
+    if (!vk->spirv->fns->compile_glsl(vk->spirv, tactx, type, glsl, spirv)) {
         ret = VK_ERROR_INVALID_SHADER_NV;
         msgl = MSGL_ERR;
     }
@@ -1088,9 +1085,8 @@ static struct ra_renderpass *vk_renderpass_create(struct ra *ra,
                                     const struct ra_renderpass_params *params)
 {
     struct mpvk_ctx *vk = ra_vk_get(ra);
-    struct ra_vk *p = ra->priv;
     bool success = false;
-    assert(p->spirv);
+    assert(vk->spirv);
 
     struct ra_renderpass *pass = talloc_zero(NULL, struct ra_renderpass);
     pass->params = *ra_renderpass_params_copy(pass, params);
@@ -1196,7 +1192,7 @@ static struct ra_renderpass *vk_renderpass_create(struct ra *ra,
                               &pass_vk->pipeLayout));
 
     struct bstr vert = {0}, frag = {0}, comp = {0}, pipecache = {0};
-    if (vk_use_cached_program(params, p->spirv, &vert, &frag, &comp, &pipecache)) {
+    if (vk_use_cached_program(params, vk->spirv, &vert, &frag, &comp, &pipecache)) {
         MP_VERBOSE(ra, "Using cached SPIR-V and VkPipeline.\n");
     } else {
         pipecache.len = 0;
@@ -1375,7 +1371,7 @@ static struct ra_renderpass *vk_renderpass_create(struct ra *ra,
 
     struct vk_cache_header header = {
         .cache_version = vk_cache_version,
-        .compiler_version = p->spirv->compiler_version,
+        .compiler_version = vk->spirv->compiler_version,
         .vert_spirv_len = vert.len,
         .frag_spirv_len = frag.len,
         .comp_spirv_len = comp.len,
@@ -1384,8 +1380,8 @@ static struct ra_renderpass *vk_renderpass_create(struct ra *ra,
 
     for (int i = 0; i < MP_ARRAY_SIZE(header.magic); i++)
         header.magic[i] = vk_cache_magic[i];
-    for (int i = 0; i < sizeof(p->spirv->name); i++)
-        header.compiler[i] = p->spirv->name[i];
+    for (int i = 0; i < sizeof(vk->spirv->name); i++)
+        header.compiler[i] = vk->spirv->name[i];
 
     struct bstr *prog = &pass->params.cached_program;
     bstr_xappend(pass, prog, (struct bstr){ (char *) &header, sizeof(header) });

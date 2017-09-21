@@ -49,9 +49,10 @@ const struct m_sub_options spirv_conf = {
 
 bool spirv_compiler_init(struct ra_ctx *ctx)
 {
-    struct spirv_opts *opts = mp_get_config_group(ctx, ctx->global, &spirv_conf);
+    void *tmp = talloc_new(NULL);
+    struct spirv_opts *opts = mp_get_config_group(tmp, ctx->global, &spirv_conf);
     int compiler = opts->compiler;
-    talloc_free(opts);
+    talloc_free(tmp);
 
     for (int i = SPIRV_AUTO+1; i < MP_ARRAY_SIZE(compilers); i++) {
         if (compiler != SPIRV_AUTO && i != compiler)
