@@ -208,9 +208,13 @@ bool mpvk_instance_init(struct mpvk_ctx *vk, struct mp_log *log,
     if (!debug)
         info.enabledExtensionCount -= debugExtensionCount;
 
+    MP_VERBOSE(vk, "Creating instance with extensions:\n");
+    for (int i = 0; i < info.enabledExtensionCount; i++)
+        MP_VERBOSE(vk, "    %s\n", info.ppEnabledExtensionNames[i]);
+
     VkResult res = vkCreateInstance(&info, MPVK_ALLOCATOR, &vk->inst);
     if (res != VK_SUCCESS) {
-        MP_VERBOSE(vk, "failed creating instance: %s\n", vk_err(res));
+        MP_VERBOSE(vk, "Failed creating instance: %s\n", vk_err(res));
         return false;
     }
 
@@ -260,7 +264,7 @@ bool mpvk_find_phys_device(struct mpvk_ctx *vk, const char *name, bool sw)
 {
     assert(vk->surf);
 
-    MP_VERBOSE(vk, "Probing for vulkan devices..\n");
+    MP_VERBOSE(vk, "Probing for vulkan devices:\n");
 
     VkPhysicalDevice *devices = NULL;
     uint32_t num = 0;
@@ -281,7 +285,7 @@ bool mpvk_find_phys_device(struct mpvk_ctx *vk, const char *name, bool sw)
     VkPhysicalDeviceProperties props[MPVK_MAX_DEVICES];
     for (int i = 0; i < num; i++) {
         vkGetPhysicalDeviceProperties(devices[i], &props[i]);
-        MP_VERBOSE(vk, "GPU %d: %s (%s)\n", i, props[i].deviceName,
+        MP_VERBOSE(vk, "    GPU %d: %s (%s)\n", i, props[i].deviceName,
                    m_opt_choice_str(types, props[i].deviceType));
     }
 
@@ -300,11 +304,11 @@ bool mpvk_find_phys_device(struct mpvk_ctx *vk, const char *name, bool sw)
             if (!physd_supports_surface(vk, devices[i]))
                 continue;
 
-            MP_VERBOSE(vk, "Found device:\n");
-            MP_VERBOSE(vk, "  Device Name: %s\n", prop.deviceName);
-            MP_VERBOSE(vk, "  Device ID: %x:%x\n", prop.vendorID, prop.deviceID);
-            MP_VERBOSE(vk, "  Driver version: %d\n", prop.driverVersion);
-            MP_VERBOSE(vk, "  API version: %d.%d.%d\n",
+            MP_VERBOSE(vk, "Chose device:\n");
+            MP_VERBOSE(vk, "    Device Name: %s\n", prop.deviceName);
+            MP_VERBOSE(vk, "    Device ID: %x:%x\n", prop.vendorID, prop.deviceID);
+            MP_VERBOSE(vk, "    Driver version: %d\n", prop.driverVersion);
+            MP_VERBOSE(vk, "    API version: %d.%d.%d\n",
                     VK_VERSION_MAJOR(prop.apiVersion),
                     VK_VERSION_MINOR(prop.apiVersion),
                     VK_VERSION_PATCH(prop.apiVersion));
