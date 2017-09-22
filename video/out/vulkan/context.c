@@ -450,12 +450,33 @@ static bool submit_frame(struct ra_swchain *sw, const struct vo_frame *frame)
 {
     struct priv *p = sw->priv;
     struct ra *ra = sw->ctx->ra;
+    struct mpvk_ctx *vk = p->vk;
 
     VkSemaphore acquired = p->acquired[p->idx_acquired++];
     p->idx_acquired %= p->num_acquired;
 
-    return ra_vk_present_frame(ra, p->images[p->last_imgidx], acquired,
-                               p->swchain, p->last_imgidx, &p->frames_in_flight);
+    VkSemaphore done;
+    if (!ra_vk_submit(ra, p->images[p->last_imgidx], acquired, &done,
+                      &p->frames_in_flight))
+        goto error;
+
+    struct vk_cmdpool *pool = vk->pool;
+    VkQueue queue = pool->queues[pool->qindex]; // reuse
+
+    VkPresentInfoKHR pinfo = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &done,
+        .swapchainCount = 1,
+        .pSwapchains = &p->swchain,
+        .pImageIndices = &p->last_imgidx,
+    };
+
+    VK(vkQueuePresentKHR(queue, &pinfo));
+    return true;
+
+error:
+    return false;
 }
 
 static void swap_buffers(struct ra_swchain *sw)

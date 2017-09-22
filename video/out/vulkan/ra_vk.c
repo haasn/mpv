@@ -1790,10 +1790,9 @@ static void present_cb(void *priv, int *inflight)
     *inflight -= 1;
 }
 
-bool ra_vk_present_frame(struct ra *ra, struct ra_tex *tex, VkSemaphore acquired,
-                         VkSwapchainKHR swchain, int index, int *inflight)
+bool ra_vk_submit(struct ra *ra, struct ra_tex *tex, VkSemaphore acquired,
+                  VkSemaphore *done, int *inflight)
 {
-    struct mpvk_ctx *vk = ra_vk_get(ra);
     struct vk_cmd *cmd = vk_require_cmd(ra, GRAPHICS);
     if (!cmd)
         goto error;
@@ -1803,7 +1802,9 @@ bool ra_vk_present_frame(struct ra *ra, struct ra_tex *tex, VkSemaphore acquired
         vk_cmd_callback(cmd, (vk_cb)present_cb, NULL, inflight);
     }
 
-    tex_barrier(cmd, tex->priv, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+    struct ra_tex_vk *tex_vk = tex->priv;
+    assert(tex_vk->external_img);
+    tex_barrier(cmd, tex_vk, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
 
     // These are the only two stages that we use/support for actually
@@ -1815,25 +1816,7 @@ bool ra_vk_present_frame(struct ra *ra, struct ra_tex *tex, VkSemaphore acquired
                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    VkSemaphore done;
-    if (!vk_flush(ra, &done))
-        goto error;
-
-    struct vk_cmdpool *pool = vk->pool;
-    VkQueue queue = pool->queues[pool->qindex]; // reuse
-
-    VkPresentInfoKHR pinfo = {
-        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &done,
-        .swapchainCount = 1,
-        .pSwapchains = &swchain,
-        .pImageIndices = &index,
-    };
-
-    VK(vkQueuePresentKHR(queue, &pinfo));
-
-    return true;
+    return vk_flush(ra, done);
 
 error:
     return false;
