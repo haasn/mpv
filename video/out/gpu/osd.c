@@ -53,7 +53,7 @@ static const struct ra_renderpass_input vertex_vao[] = {
 struct mpgl_osd_part {
     enum sub_bitmap_format format;
     int change_id;
-    struct ra_tex_ref *texture;
+    const struct ra_tex_ref *texture;
     int w, h;
     int num_subparts;
     int prev_num_subparts;
@@ -131,9 +131,15 @@ static bool upload_osd(struct mpgl_osd *ctx, struct mpgl_osd_part *osd,
 
     assert(imgs->packed);
 
+    int new_w = FFMAX(32, next_pow2(imgs->packed_w)),
+        new_h = FFMAX(32, next_pow2(imgs->packed_h));
+
+    if (osd->w != new_w || osd->h != new_h)
+        ra_tex_pool_gc(ctx->pool, TEX_SCOPE_OSD);
+
     osd->format = imgs->format;
-    osd->w = FFMAX(32, next_pow2(imgs->packed_w));
-    osd->h = FFMAX(32, next_pow2(imgs->packed_h));
+    osd->w = new_w;
+    osd->h = new_h;
 
     if (osd->w > ra->max_texture_wh || osd->h > ra->max_texture_wh) {
         MP_ERR(ctx, "OSD bitmaps do not fit on a surface with the maximum "
@@ -156,7 +162,7 @@ static bool upload_osd(struct mpgl_osd *ctx, struct mpgl_osd_part *osd,
     };
 
     ra_tex_ref_free(&osd->texture);
-    osd->texture = ra_tex_pool_get(ctx->pool, &tex_params);
+    osd->texture = ra_tex_pool_get(ctx->pool, &tex_params, TEX_SCOPE_OSD);
     struct ra_tex_upload_params ul_params = {
         .tex = osd->texture->tex,
         .src = imgs->packed->planes[0],

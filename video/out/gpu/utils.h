@@ -96,23 +96,32 @@ bool ra_tex_upload_pbo(struct ra *ra, struct ra_buf_pool *pbo,
 struct ra_tex_pool *ra_tex_pool_alloc(struct ra *ra);
 void ra_tex_pool_free(struct ra_tex_pool **pool);
 
-// For garbage collection: should be called once per frame
-void ra_tex_pool_gc_tick(struct ra_tex_pool *pool);
+enum tex_scope {
+    TEX_SCOPE_VIDEO  = (1 << 0), // invalidated on video size changes
+    TEX_SCOPE_OUTPUT = (1 << 1), // invalidated on output size changes
+    TEX_SCOPE_OSD    = (1 << 2), // invalidated on OSD size changes
+};
 
 struct ra_tex_ref {
     struct ra_tex *tex;
+    enum tex_scope scope;
     void *priv;
 };
 
 // Texture references are internally ref-counted. Once the reference count hits
 // zero, they will be automatically released back to the pool, and the contents
 // of the ra_tex become undefined.
-struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool,
-                                   const struct ra_tex_params *params);
+const struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool,
+                                         const struct ra_tex_params *params,
+                                         enum tex_scope scope);
 
 // These may safely be called on NULL refs
-struct ra_tex_ref *ra_tex_ref_dup(struct ra_tex_ref *ref);
-void ra_tex_ref_free(struct ra_tex_ref **ref);
+const struct ra_tex_ref *ra_tex_ref_dup(const struct ra_tex_ref *ref);
+void ra_tex_ref_free(const struct ra_tex_ref **ref);
+
+// Performs a garbage collection pass, also invalidates that match any of the
+// given mask of scopes
+void ra_tex_pool_gc(struct ra_tex_pool *pool, enum tex_scope scope);
 
 // Layout rules for GLSL's packing modes
 struct ra_layout std140_layout(struct ra_renderpass_input *inp);

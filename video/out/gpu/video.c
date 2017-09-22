@@ -87,7 +87,7 @@ struct texplane {
     int w, h;
     bool flipped;
     // for swdec:
-    struct ra_tex_ref *ref;
+    const struct ra_tex_ref *ref;
     struct ra_tex_params params;
 };
 
@@ -126,7 +126,7 @@ struct image {
     enum plane_type type; // must be set to something non-zero
     int components; // number of relevant coordinates
     float multiplier; // multiplier to be used when sampling
-    struct ra_tex_ref *ref; // if set, this image is holding on to a tex_ref
+    const struct ra_tex_ref *ref; // if set, this image is holding on to a tex_ref
     int w, h; // logical size (after transformation)
     struct gl_transform transform; // rendering transformation
 };
@@ -224,7 +224,7 @@ struct gl_video {
     bool forced_dumb_mode;
 
     const struct ra_format *fbo_format;
-    struct ra_tex_ref *output_cache;
+    const struct ra_tex_ref *output_cache;
     struct ra_tex *vdpau_deinterleave_tex[2];
     struct ra_buf *hdr_peak_ssbo;
 
@@ -620,7 +620,7 @@ static struct image image_wrap_tex(struct ra_tex *tex, enum plane_type type,
 // Fill an image struct from a reference. This is the normal way to do
 // things. The image will "take over" ownership of the ref, so the ref must
 // not be used afterwards.
-static struct image image_wrap(struct ra_tex_ref *ref, enum plane_type type,
+static struct image image_wrap(const struct ra_tex_ref *ref, enum plane_type type,
                                int components)
 {
     struct image img = image_wrap_tex(ref->tex, type, components);
@@ -1203,7 +1203,8 @@ static void finish_pass_fbo(struct gl_video *p, struct ra_fbo fbo,
 
 // w, h: required FBO target dimension, and also defines the target rectangle
 //       used for rasterization
-static struct ra_tex_ref *finish_pass_pool(struct gl_video *p, int w, int h)
+static const struct ra_tex_ref *finish_pass_pool(struct gl_video *p, int w, int h,
+                                                 enum tex_scope scope)
 {
     struct ra_tex_params params = {
         .dimensions = 2,
@@ -1217,7 +1218,7 @@ static struct ra_tex_ref *finish_pass_pool(struct gl_video *p, int w, int h)
         .render_dst = !p->pass_compute.active,
     };
 
-    struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, &params);
+    const struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, &params, scope);
 
     if (p->pass_compute.active) {
         gl_sc_uniform_image2D_wo(p->sc, "out_image", ref->tex);
@@ -1238,9 +1239,10 @@ static struct ra_tex_ref *finish_pass_pool(struct gl_video *p, int w, int h)
 
 // Helper that combines finish_pass_pool and image_wrap for the common case
 // of PLANE_RGB + p->components
-static struct image finish_pass_img(struct gl_video *p, int w, int h)
+static struct image finish_pass_img(struct gl_video *p, int w, int h,
+                                    enum tex_scope scope)
 {
-    return image_wrap(finish_pass_pool(p, w, h), PLANE_RGB, p->components);
+    return image_wrap(finish_pass_pool(p, w, h, scope), PLANE_RGB, p->components);
 }
 
 static const char *get_tex_swizzle(struct image *img)
@@ -1435,7 +1437,8 @@ next_bind: ;
 // should not be re-used afterwards.
 // If 'trans' is NULL, the shader is forbidden from transforming img
 static struct image pass_hook(struct gl_video *p, const char *name,
-                              struct image img, struct gl_transform *trans)
+                              struct image img, struct gl_transform *trans,
+                              enum tex_scope scope)
 {
     if (!name)
         return img;
@@ -1479,7 +1482,7 @@ found:
         int h = lroundf(fabs(sz.y1 - sz.y0));
 
         const char *store_name = hook->save_tex ? hook->save_tex : name;
-        struct image saved_img = image_wrap(finish_pass_pool(p, w, h),
+        struct image saved_img = image_wrap(finish_pass_pool(p, w, h, scope),
                                             img.type, comps);
 
         // If the texture we're saving overwrites the "current" texture, also
@@ -1512,13 +1515,14 @@ found:
 // accumulated in tex_trans, and the FBO is dimensioned according
 // to p->texture_w/h
 static void pass_opt_hook_point(struct gl_video *p, const char *name,
-                                struct gl_transform *tex_trans)
+                                struct gl_transform *tex_trans,
+                                enum tex_scope scope)
 {
     if (!tex_needed(p, name))
         return;
 
-    struct image img = finish_pass_img(p, p->texture_w, p->texture_h);
-    img = pass_hook(p, name, img, tex_trans);
+    struct image img = finish_pass_img(p, p->texture_w, p->texture_h, scope);
+    img = pass_hook(p, name, img, tex_trans, scope);
     read_image(p, &(int){0}, img);
     image_unref(&img);
     p->texture_w = img.w;
@@ -1690,7 +1694,8 @@ static void pass_sample_separated(struct gl_video *p, struct image src,
     GLSLF("color *= %f;\n", src.multiplier);
 
     struct image tmp;
-    tmp = image_wrap(finish_pass_pool(p, src.w, h), src.type, src.components);
+    tmp = image_wrap(finish_pass_pool(p, src.w, h, TEX_SCOPE_OUTPUT),
+                     src.type, src.components);
 
     // Second pass (scale only in the x dir)
     tmp.transform = t_x;
@@ -2035,8 +2040,8 @@ static void pass_read_video(struct gl_video *p)
             image_unref(&img[n]);
             pass_describe(p, "merging planes");
             assert(!img[first].ref);
-            img[first] = image_wrap(finish_pass_pool(p, img[n].w, img[n].h),
-                                    img[n].type, num);
+            img[first] = image_wrap(finish_pass_pool(p, img[n].w, img[n].h,
+                                    TEX_SCOPE_VIDEO), img[n].type, num);
             img[n] = (struct image){0};
         }
     }
@@ -2049,8 +2054,8 @@ static void pass_read_video(struct gl_video *p)
             read_image(p, &(int){0}, img[n]);
             image_unref(&img[n]);
             pass_describe(p, "use_integer fix");
-            img[n] = image_wrap(finish_pass_pool(p, img[n].w, img[n].h),
-                                img[n].type, img[n].components);
+            img[n] = image_wrap(finish_pass_pool(p, img[n].w, img[n].h,
+                                TEX_SCOPE_VIDEO), img[n].type, img[n].components);
         }
     }
 
@@ -2067,7 +2072,7 @@ static void pass_read_video(struct gl_video *p)
         default: continue;
         }
 
-        img[n] = pass_hook(p, name, img[n], &offsets[n]);
+        img[n] = pass_hook(p, name, img[n], &offsets[n], TEX_SCOPE_VIDEO);
     }
 
     // At this point all planes are finalized but they may not be at the
@@ -2175,12 +2180,12 @@ static void pass_read_video(struct gl_video *p)
             GLSLF("// upscaling plane %d\n", n);
             pass_sample(p, img[n], scaler, conf, 1.0, p->texture_w, p->texture_h);
             image_unref(&img[n]);
-            img[n] = image_wrap(finish_pass_pool(p, p->texture_w, p->texture_h),
-                                img[n].type, img[n].components);
+            img[n] = image_wrap(finish_pass_pool(p, p->texture_w, p->texture_h,
+                                TEX_SCOPE_VIDEO), img[n].type, img[n].components);
         }
 
         // Run any post-scaling hooks
-        img[n] = pass_hook(p, name, img[n], NULL);
+        img[n] = pass_hook(p, name, img[n], NULL, TEX_SCOPE_VIDEO);
     }
 
     // All planes are of the same size and properly aligned at this point
@@ -2347,7 +2352,7 @@ static void pass_scale_main(struct gl_video *p)
     if (use_linear) {
         p->use_linear = true;
         pass_linearize(p->sc, p->image_params.color.gamma);
-        pass_opt_hook_point(p, "LINEAR", NULL);
+        pass_opt_hook_point(p, "LINEAR", NULL, TEX_SCOPE_VIDEO);
     }
 
     bool use_sigmoid = use_linear && p->opts.sigmoid_upscaling && upscaling;
@@ -2363,10 +2368,10 @@ static void pass_scale_main(struct gl_video *p)
         sig_scale  = 1.0/(1+expf(sig_slope * (sig_center-1))) - sig_offset;
         GLSLF("color.rgb = %f - log(1.0/(color.rgb * %f + %f) - 1.0) * 1.0/%f;\n",
                 sig_center, sig_scale, sig_offset, sig_slope);
-        pass_opt_hook_point(p, "SIGMOID", NULL);
+        pass_opt_hook_point(p, "SIGMOID", NULL, TEX_SCOPE_VIDEO);
     }
 
-    pass_opt_hook_point(p, "PREKERNEL", NULL);
+    pass_opt_hook_point(p, "PREKERNEL", NULL, TEX_SCOPE_VIDEO);
 
     int vp_w = p->dst_rect.x1 - p->dst_rect.x0;
     int vp_h = p->dst_rect.y1 - p->dst_rect.y0;
@@ -2374,7 +2379,8 @@ static void pass_scale_main(struct gl_video *p)
     compute_src_transform(p, &transform);
 
     GLSLF("// main scaling\n");
-    struct image tmp = finish_pass_img(p, p->texture_w, p->texture_h);
+    struct image tmp = finish_pass_img(p, p->texture_w, p->texture_h,
+                                       TEX_SCOPE_VIDEO);
     gl_transform_trans(transform, &tmp.transform);
     pass_sample(p, tmp, scaler, &scaler_conf, scale_factor, vp_w, vp_h);
     image_unref(&tmp);
@@ -2383,7 +2389,7 @@ static void pass_scale_main(struct gl_video *p)
     p->texture_w = vp_w;
     p->texture_h = vp_h;
 
-    pass_opt_hook_point(p, "POSTKERNEL", NULL);
+    pass_opt_hook_point(p, "POSTKERNEL", NULL, TEX_SCOPE_OUTPUT);
 
     GLSLF("// scaler post-conversion\n");
     if (use_sigmoid) {
@@ -2717,9 +2723,9 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
         return true;
 
     pass_read_video(p);
-    pass_opt_hook_point(p, "NATIVE", &p->texture_offset);
+    pass_opt_hook_point(p, "NATIVE", &p->texture_offset, TEX_SCOPE_VIDEO);
     pass_convert_yuv(p);
-    pass_opt_hook_point(p, "MAINPRESUB", &p->texture_offset);
+    pass_opt_hook_point(p, "MAINPRESUB", &p->texture_offset, TEX_SCOPE_VIDEO);
 
     // For subtitles
     double vpts = p->image.mpi->pts;
@@ -2733,14 +2739,14 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
             .w = p->texture_w, .h = p->texture_h,
             .display_par = scale[1] / scale[0], // counter compensate scaling
         };
-        struct image tmp = finish_pass_img(p, rect.w, rect.h);
+        struct image tmp = finish_pass_img(p, rect.w, rect.h, TEX_SCOPE_VIDEO);
         pass_describe(p, "blend subs video");
         struct ra_fbo fbo = { tmp.tex };
         pass_draw_osd(p, OSD_DRAW_SUB_ONLY, vpts, rect, fbo, false);
         read_image(p, &(int){0}, tmp);
         image_unref(&tmp);
     }
-    pass_opt_hook_point(p, "MAIN", &p->texture_offset);
+    pass_opt_hook_point(p, "MAIN", &p->texture_offset, TEX_SCOPE_VIDEO);
 
     pass_scale_main(p);
 
@@ -2764,7 +2770,8 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
             pass_delinearize(p->sc, p->image_params.color.gamma);
             p->use_linear = false;
         }
-        struct image tmp = finish_pass_img(p, p->texture_w, p->texture_h);
+        struct image tmp = finish_pass_img(p, p->texture_w, p->texture_h,
+                                           TEX_SCOPE_OUTPUT);
         pass_describe(p, "blend subs");
         struct ra_fbo fbo = { tmp.tex };
         pass_draw_osd(p, OSD_DRAW_SUB_ONLY, vpts, rect, fbo, false);
@@ -2772,7 +2779,7 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
         image_unref(&tmp);
     }
 
-    pass_opt_hook_point(p, "SCALED", NULL);
+    pass_opt_hook_point(p, "SCALED", NULL, TEX_SCOPE_OUTPUT);
 
     for (int i = 0; i < p->saved_img_num; i++)
         image_unref(&p->saved_img[i].img);
@@ -2801,7 +2808,7 @@ static void pass_draw_to_screen(struct gl_video *p, struct ra_fbo fbo)
     if (p->pass_compute.active) {
         int o_w = p->dst_rect.x1 - p->dst_rect.x0,
             o_h = p->dst_rect.y1 - p->dst_rect.y0;
-        struct image tmp = finish_pass_img(p, o_w, o_h);
+        struct image tmp = finish_pass_img(p, o_w, o_h, TEX_SCOPE_OUTPUT);
         read_image(p, &(int){0}, tmp);
         image_unref(&tmp);
     }
@@ -2822,7 +2829,7 @@ static void pass_draw_to_screen(struct gl_video *p, struct ra_fbo fbo)
         }
     }
 
-    pass_opt_hook_point(p, "OUTPUT", NULL);
+    pass_opt_hook_point(p, "OUTPUT", NULL, TEX_SCOPE_OUTPUT);
 
     pass_dither(p);
     pass_describe(p, "output to screen");
@@ -2848,7 +2855,7 @@ static bool update_surface(struct gl_video *p, struct mp_image *mpi,
     }
 
     image_unref(&surf->img);
-    surf->img = finish_pass_img(p, vp_w, vp_h);
+    surf->img = finish_pass_img(p, vp_w, vp_h, TEX_SCOPE_OUTPUT);
     surf->id  = id;
     surf->pts = mpi->pts;
     return true;
@@ -3026,7 +3033,7 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
 void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame,
                            struct ra_fbo fbo)
 {
-    ra_tex_pool_gc_tick(p->texpool);
+    ra_tex_pool_gc(p->texpool, 0);
     struct mp_rect target_rc = {0, 0, fbo.tex->params.w, fbo.tex->params.h};
 
     p->broken_frame = false;
@@ -3095,7 +3102,8 @@ void gl_video_render_frame(struct gl_video *p, struct vo_frame *frame,
                         .render_dst = true,
                         .blit_src = true,
                     };
-                    p->output_cache = ra_tex_pool_get(p->texpool, &params);
+                    p->output_cache = ra_tex_pool_get(p->texpool, &params,
+                                                      TEX_SCOPE_OUTPUT);
                     dest_fbo = (struct ra_fbo) { p->output_cache->tex };
                 }
                 pass_draw_to_screen(p, dest_fbo);
@@ -3169,19 +3177,23 @@ void gl_video_resize(struct gl_video *p,
                      struct mp_rect *src, struct mp_rect *dst,
                      struct mp_osd_res *osd)
 {
-    if (mp_rect_equals(&p->src_rect, src) &&
-        mp_rect_equals(&p->dst_rect, dst) &&
-        osd_res_equals(p->osd_rect, *osd))
-        return;
+    if (!mp_rect_equals(&p->src_rect, src))
+        ra_tex_pool_gc(p->texpool, TEX_SCOPE_VIDEO);
+
+    if (!mp_rect_equals(&p->dst_rect, dst)) {
+        gl_video_reset_surfaces(p);
+        ra_tex_pool_gc(p->texpool, TEX_SCOPE_OUTPUT);
+    }
+
+    if (!osd_res_equals(p->osd_rect, *osd)) {
+        if (p->osd)
+            mpgl_osd_resize(p->osd, p->osd_rect, p->image_params.stereo_out);
+        ra_tex_pool_gc(p->texpool, TEX_SCOPE_OSD);
+    }
 
     p->src_rect = *src;
     p->dst_rect = *dst;
     p->osd_rect = *osd;
-
-    gl_video_reset_surfaces(p);
-
-    if (p->osd)
-        mpgl_osd_resize(p->osd, p->osd_rect, p->image_params.stereo_out);
 }
 
 static void frame_perf_data(struct pass_info pass[], struct mp_frame_perf *out)
@@ -3320,7 +3332,7 @@ static bool pass_upload_image(struct gl_video *p, struct mp_image *mpi,
     for (int n = 0; n < p->plane_count; n++) {
         struct texplane *plane = &vimg->planes[n];
         plane->flipped = mpi->stride[0] < 0;
-        plane->ref = ra_tex_pool_get(p->texpool, &plane->params);
+        plane->ref = ra_tex_pool_get(p->texpool, &plane->params, TEX_SCOPE_VIDEO);
         plane->tex = plane->ref->tex;
 
         struct ra_tex_upload_params params = {
@@ -3383,7 +3395,7 @@ static bool test_fbo(struct gl_video *p, const struct ra_format *fmt)
         .storage_dst = true,
     };
 
-    struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, &params);
+    const struct ra_tex_ref *ref = ra_tex_pool_get(p->texpool, &params, 0);
     bool success = !!ref;
     ra_tex_ref_free(&ref);
 

@@ -208,11 +208,12 @@ void ra_tex_pool_free(struct ra_tex_pool **pool)
     *pool = NULL;
 }
 
-void ra_tex_pool_gc_tick(struct ra_tex_pool *pool)
+void ra_tex_pool_gc(struct ra_tex_pool *pool, enum tex_scope scope)
 {
     for (int i = 0; i < pool->num_pending; i++) {
         struct ra_tex_entry *entry = pool->pending[i];
-        if (pool->ra->fns->tex_poll(pool->ra, entry->ref.tex)) {
+        bool freetouse = pool->ra->fns->tex_poll(pool->ra, entry->ref.tex);
+        if (freetouse || (entry->ref.scope & scope)) {
             MP_TARRAY_APPEND(pool, pool->avail, pool->num_avail, entry);
             // Remove from the array and repeat this loop iteration
             MP_TARRAY_REMOVE_AT(pool->pending, pool->num_pending, i--);
@@ -222,9 +223,17 @@ void ra_tex_pool_gc_tick(struct ra_tex_pool *pool)
     for (int i = 0; i < pool->num_avail; i++) {
         struct ra_tex_entry *entry = pool->avail[i];
         struct ra_tex *tex = entry->ref.tex;
-        if (++entry->age > RA_TEX_ENTRY_MAX_AGE) {
-            MP_VERBOSE(pool->ra, "Freeing %dx%dx%d texture due to old age.\n",
-                       tex->params.w, tex->params.h, tex->params.d);
+
+        const char *clean = NULL;
+        if (entry->ref.scope & scope) {
+            clean = "invalidated by scope";
+        } else if (++entry->age > RA_TEX_ENTRY_MAX_AGE) {
+            clean = "old age";
+        }
+
+        if (clean) {
+            MP_VERBOSE(pool->ra, "Freeing %dx%dx%d texture: %s.\n",
+                       tex->params.w, tex->params.h, tex->params.d, clean);
             ra_tex_free(pool->ra, &entry->ref.tex);
             talloc_free(entry);
             // Remove from the array and repeat this loop iteration
@@ -259,14 +268,16 @@ static bool tex_params_equal(const struct ra_tex_params *a,
            a->external_oes == b->external_oes;
 }
 
-struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool,
-                                   const struct ra_tex_params *params)
+const struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool,
+                                         const struct ra_tex_params *params,
+                                         enum tex_scope scope)
 {
     for (int i = 0; i < pool->num_avail; i++) {
         struct ra_tex_entry *entry = pool->avail[i];
         if (tex_params_equal(&entry->ref.tex->params, params)) {
             MP_TARRAY_REMOVE_AT(pool->avail, pool->num_avail, i);
             entry->refs = 1;
+            entry->ref.scope = scope;
             return &entry->ref;
         }
     }
@@ -290,7 +301,7 @@ struct ra_tex_ref *ra_tex_pool_get(struct ra_tex_pool *pool,
     return &entry->ref;
 }
 
-struct ra_tex_ref *ra_tex_ref_dup(struct ra_tex_ref *ref)
+const struct ra_tex_ref *ra_tex_ref_dup(const struct ra_tex_ref *ref)
 {
     if (!ref)
         return NULL;
@@ -301,7 +312,7 @@ struct ra_tex_ref *ra_tex_ref_dup(struct ra_tex_ref *ref)
     return ref;
 }
 
-void ra_tex_ref_free(struct ra_tex_ref **ref)
+void ra_tex_ref_free(const struct ra_tex_ref **ref)
 {
     if (!*ref)
         return;
