@@ -210,6 +210,8 @@ void ra_tex_pool_free(struct ra_tex_pool **pool)
 
 void ra_tex_pool_gc(struct ra_tex_pool *pool, enum tex_scope scope)
 {
+    // This also adds invalidated images to the avail pool, for the sake
+    // of the second loop
     for (int i = 0; i < pool->num_pending; i++) {
         struct ra_tex_entry *entry = pool->pending[i];
         bool freetouse = pool->ra->fns->tex_poll(pool->ra, entry->ref.tex);
@@ -224,16 +226,16 @@ void ra_tex_pool_gc(struct ra_tex_pool *pool, enum tex_scope scope)
         struct ra_tex_entry *entry = pool->avail[i];
         struct ra_tex *tex = entry->ref.tex;
 
-        const char *clean = NULL;
+        const char *reason = NULL;
         if (entry->ref.scope & scope) {
-            clean = "invalidated by scope";
+            reason = "invalidated by scope";
         } else if (++entry->age > RA_TEX_ENTRY_MAX_AGE) {
-            clean = "old age";
+            reason = "old age";
         }
 
-        if (clean) {
+        if (reason) {
             MP_VERBOSE(pool->ra, "Freeing %dx%dx%d texture: %s.\n",
-                       tex->params.w, tex->params.h, tex->params.d, clean);
+                       tex->params.w, tex->params.h, tex->params.d, reason);
             ra_tex_free(pool->ra, &entry->ref.tex);
             talloc_free(entry);
             // Remove from the array and repeat this loop iteration
