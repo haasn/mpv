@@ -47,6 +47,7 @@ struct mpvk_ctx {
 
     struct vk_malloc *alloc; // memory allocator for this device
     struct vk_cmdpool *pool; // primary command pool for this device
+    struct vk_cmdpool *pool_transfer; // pool for async transfers (optional)
     struct vk_cmd *last_cmd; // most recently submitted command
     struct spirv_compiler *spirv; // GLSL -> SPIR-V compiler
 

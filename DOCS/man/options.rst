@@ -4196,11 +4196,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     Controls the number of VkQueues used for rendering (limited by how many
     your device supports). In theory, using more queues could enable some
     parallelism between frames (when using a ``--swapchain-depth`` higher than
-    1). (Default: 1)
-
-    NOTE: Setting this to a value higher than 1 may cause graphical corruption,
-    as mpv's vulkan implementation currently does not try and protect textures
-    against concurrent access.
+    1). (Default: 8)
 
 ``--spirv-compiler=<compiler>``
     Controls which compiler is used to translate GLSL to SPIR-V. This is
