@@ -8,6 +8,7 @@ static struct ra_fns ra_fns_vk;
 
 enum queue_type {
     GRAPHICS,
+    COMPUTE,
     TRANSFER,
     QUEUE_TYPE_COUNT,
 };
@@ -40,10 +41,13 @@ static struct vk_cmd *vk_require_cmd(struct ra *ra, enum queue_type type)
     struct vk_cmdpool *pool;
     switch (type) {
     case GRAPHICS: pool = vk->pool_graphics; break;
+    case COMPUTE:  pool = vk->pool_compute;  break;
 
-    // GRAPHICS also implies TRANSFER capability (vulkan spec)
+    // GRAPHICS and COMPUTE pools both imply TRANSFER capability (vulkan spec)
     case TRANSFER:
         pool = vk->pool_transfer;
+        if (!pool)
+            pool = vk->pool_compute;
         if (!pool)
             pool = vk->pool_graphics;
         break;
@@ -199,8 +203,13 @@ struct ra *ra_create_vk(struct mpvk_ctx *vk, struct mp_log *log)
     ra->max_shmem = vk->limits.maxComputeSharedMemorySize;
     ra->max_pushc_size = vk->limits.maxPushConstantsSize;
 
-    if (vk->pool_graphics->props.queueFlags & VK_QUEUE_COMPUTE_BIT)
+    if (vk->pool_compute) {
         ra->caps |= RA_CAP_COMPUTE;
+        // If we have more compute queues than graphics queues, we probably
+        // want to be using them. (This seems mostly relevant for AMD)
+        if (vk->pool_compute->qcount > vk->pool_graphics->qcount)
+            ra->caps |= RA_CAP_PARALLEL_COMPUTE;
+    }
 
     if (!vk_setup_formats(ra))
         goto error;
@@ -766,6 +775,7 @@ static struct ra_buf *vk_buf_create(struct ra *ra,
         bufFlags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         memFlags |= VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         align = MP_ALIGN_UP(align, vk->limits.minStorageBufferOffsetAlignment);
+        buf_vk->update_queue = COMPUTE;
         break;
     case RA_BUF_TYPE_VERTEX:
         bufFlags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -1456,7 +1466,7 @@ static void vk_renderpass_run(struct ra *ra,
 
     static const enum queue_type types[] = {
         [RA_RENDERPASS_TYPE_RASTER]  = GRAPHICS,
-        [RA_RENDERPASS_TYPE_COMPUTE] = GRAPHICS,
+        [RA_RENDERPASS_TYPE_COMPUTE] = COMPUTE,
     };
 
     struct vk_cmd *cmd = vk_require_cmd(ra, types[pass->params.type]);

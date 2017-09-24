@@ -505,6 +505,7 @@ bool mpvk_device_init(struct mpvk_ctx *vk, struct mpvk_device_opts opts)
     }
 
     int idx_gfx  = find_qf(qfs, qfnum, VK_QUEUE_GRAPHICS_BIT),
+        idx_comp = find_qf(qfs, qfnum, VK_QUEUE_COMPUTE_BIT),
         idx_tf   = find_qf(qfs, qfnum, VK_QUEUE_TRANSFER_BIT);
 
     // Vulkan requires at least one GRAPHICS queue, so if this fails something
@@ -520,6 +521,8 @@ bool mpvk_device_init(struct mpvk_ctx *vk, struct mpvk_device_opts opts)
         goto error;
     }
 
+    if (idx_comp >= 0 && idx_comp != idx_gfx)
+        MP_VERBOSE(vk, "Using async compute (QF %d)\n", idx_comp);
     if (idx_tf >= 0 && idx_tf != idx_gfx)
         MP_VERBOSE(vk, "Using async transfer (QF %d)\n", idx_tf);
 
@@ -527,6 +530,7 @@ bool mpvk_device_init(struct mpvk_ctx *vk, struct mpvk_device_opts opts)
     VkDeviceQueueCreateInfo *qinfos = NULL;
     int num_qinfos = 0;
     add_qinfo(tmp, &qinfos, &num_qinfos, qfs, idx_gfx, opts.queue_count);
+    add_qinfo(tmp, &qinfos, &num_qinfos, qfs, idx_comp, opts.queue_count);
     add_qinfo(tmp, &qinfos, &num_qinfos, qfs, idx_tf, opts.queue_count);
 
     const char **exts = NULL;
@@ -559,6 +563,7 @@ bool mpvk_device_init(struct mpvk_ctx *vk, struct mpvk_device_opts opts)
     }
 
     vk->pool_graphics = vk->pools[idx_gfx];
+    vk->pool_compute  = idx_comp >= 0 ? vk->pools[idx_comp] : NULL;
     vk->pool_transfer = idx_tf   >= 0 ? vk->pools[idx_tf] : NULL;
 
     vk_malloc_init(vk);
