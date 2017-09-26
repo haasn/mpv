@@ -740,8 +740,12 @@ bool vk_cmd_submit(struct mpvk_ctx *vk, struct vk_cmd *cmd)
 
     VK(vkResetFences(vk->dev, 1, &cmd->fence));
     VK(vkQueueSubmit(queue, 1, &sinfo, cmd->fence));
-    MP_TRACE(vk, "Submitted command on queue %p (QF %d)\n", (void *)queue,
+    MP_WARN(vk, "Submitted command on queue %p (QF %d):\n", (void *)queue,
              pool->qf);
+    for (int i = 0; i < cmd->num_deps; i++)
+        MP_WARN(vk, "    waits on semaphore %p\n", cmd->deps[i]);
+    for (int i = 0; i < cmd->num_sigs; i++)
+        MP_WARN(vk, "    signals semaphore %p\n", cmd->sigs[i]);
 
     cmd->num_deps = 0;
     cmd->num_sigs = 0;

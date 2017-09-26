@@ -337,6 +337,7 @@ error:
 static void destroy_swapchain(struct mpvk_ctx *vk, struct priv *p)
 {
     assert(p->old_swapchain);
+    MP_WARN(vk, "vkDestroySwapchainKHR(%p)\n", p->old_swapchain);
     vkDestroySwapchainKHR(vk->dev, p->old_swapchain, MPVK_ALLOCATOR);
     p->old_swapchain = NULL;
 }
@@ -350,6 +351,8 @@ bool ra_vk_ctx_resize(struct ra_swapchain *sw, int w, int h)
     struct ra *ra = sw->ctx->ra;
     struct mpvk_ctx *vk = p->vk;
     VkImage *vkimages = NULL;
+
+    mpvk_dev_wait_idle(vk);
 
     // It's invalid to trigger another swapchain recreation while there's
     // more than one swapchain already active, so we need to flush any pending
@@ -367,6 +370,8 @@ bool ra_vk_ctx_resize(struct ra_swapchain *sw, int w, int h)
     VK(vkCreateSwapchainKHR(vk->dev, &sinfo, MPVK_ALLOCATOR, &p->swapchain));
     p->w = w;
     p->h = h;
+    MP_WARN(vk, "vkCreateSwapchainKHR (old = %p, new = %p)\n",
+            sinfo.oldSwapchain, p->swapchain);
 
     // Freeing the old swapchain while it's still in use is an error, so do
     // it asynchronously once the device is idle.
@@ -446,7 +451,8 @@ static bool start_frame(struct ra_swapchain *sw, struct ra_fbo *out_fbo)
         goto error;
 
     uint32_t imgidx = 0;
-    MP_TRACE(vk, "vkAcquireNextImageKHR\n");
+    MP_WARN(vk, "vkAcquireNextImageKHR(swapchain = %p, semaphore = %p)\n",
+            p->swapchain, p->sem_in[p->idx_sems]);
     VkResult res = vkAcquireNextImageKHR(vk->dev, p->swapchain, UINT64_MAX,
                                          p->sem_in[p->idx_sems], NULL,
                                          &imgidx);
@@ -477,7 +483,7 @@ static bool submit_frame(struct ra_swapchain *sw, const struct vo_frame *frame)
     VkSemaphore done = p->sem_out[p->idx_sems++];
     p->idx_sems %= p->num_sems;
 
-    if (!ra_vk_submit(ra, p->images[p->last_imgidx], done, &p->frames_in_flight))
+    if (!ra_vk_submit(ra, p->images[p->last_imgidx], done, &p->frames_in_flight, p->swapchain))
         goto error;
 
     // For some reason, nvidia absolutely shits itself when presenting from a
@@ -496,6 +502,8 @@ static bool submit_frame(struct ra_swapchain *sw, const struct vo_frame *frame)
         .pImageIndices = &p->last_imgidx,
     };
 
+    MP_WARN(vk, "vkQueuePresentKHR(queue = %p, {pSwapchains = &%p, pWaitSemaphores = &%p})\n",
+            queue, p->swapchain, done);
     VK(vkQueuePresentKHR(queue, &pinfo));
     return true;
 

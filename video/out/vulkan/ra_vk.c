@@ -377,8 +377,10 @@ static void vk_tex_destroy(struct ra *ra, struct ra_tex *tex)
         vkDestroyImage(vk->dev, tex_vk->img, MPVK_ALLOCATOR);
         vk_free_memslice(vk, tex_vk->mem);
     }
-    for (int i = 0; i < MPVK_NUM_SEMS; i++)
+    for (int i = 0; i < MPVK_NUM_SEMS; i++) {
+        MP_WARN(vk, "vkDestroySemaphore(%p)\n", tex_vk->sems[i]);
         vkDestroySemaphore(vk->dev, tex_vk->sems[i], MPVK_ALLOCATOR);
+    }
 
     talloc_free(tex);
 }
@@ -1781,8 +1783,13 @@ static void present_cb(void *priv, int *inflight)
     *inflight -= 1;
 }
 
+static void testing(struct ra *ra, VkSwapchainKHR foo)
+{
+    MP_WARN(ra, "fence signalled for cmd: 'renders to swapchain %p'\n", foo);
+}
+
 bool ra_vk_submit(struct ra *ra, struct ra_tex *tex, VkSemaphore done,
-                  int *inflight)
+                  int *inflight, VkSwapchainKHR foo)
 {
     struct vk_cmd *cmd = vk_require_cmd(ra, GRAPHICS);
     if (!cmd)
@@ -1801,6 +1808,8 @@ bool ra_vk_submit(struct ra *ra, struct ra_tex *tex, VkSemaphore done,
     if (done)
         vk_cmd_sig(cmd, done);
 
+    vk_cmd_callback(cmd, (vk_cb)testing, ra, foo);
+    MP_WARN(ra, "vkQueueSubmit('renders to swapchain %p')...\n", foo);
     return vk_flush(ra);
 
 error:

@@ -23,7 +23,7 @@ struct ra_tex *ra_vk_wrap_swapchain_img(struct ra *ra, VkImage vkimg,
 // fired once the command completes. If `inflight` is non-NULL, it will be
 // incremented when the command starts and decremented when it completes.
 bool ra_vk_submit(struct ra *ra, struct ra_tex *tex, VkSemaphore done,
-                  int *inflight);
+                  int *inflight, VkSwapchainKHR foo);
 
 // May be called on a struct ra of any type. Returns NULL if the ra is not
 // a vulkan ra.
