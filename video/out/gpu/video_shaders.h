@@ -37,19 +37,19 @@ void pass_sample_bicubic_fast(struct gl_shader_cache *sc);
 void pass_sample_oversample(struct gl_shader_cache *sc, struct scaler *scaler,
                             int w, int h);
 
-void pass_linearize(struct gl_shader_cache *sc, enum mp_csp_trc trc);
-void pass_delinearize(struct gl_shader_cache *sc, enum mp_csp_trc trc);
-void pass_ootf(struct gl_shader_cache *sc, enum mp_csp_light light, float peak);
-void pass_inverse_ootf(struct gl_shader_cache *sc, enum mp_csp_light light, float peak);
+void pass_linearize(struct gl_shader_cache *sc, enum pl_color_transfer trc);
+void pass_delinearize(struct gl_shader_cache *sc, enum pl_color_transfer trc);
+void pass_ootf(struct gl_shader_cache *sc, enum pl_color_light light, float peak);
+void pass_inverse_ootf(struct gl_shader_cache *sc, enum pl_color_light light, float peak);
 
 void pass_color_map(struct gl_shader_cache *sc,
-                    struct mp_colorspace src, struct mp_colorspace dst,
+                    struct pl_color src, struct pl_color dst,
                     enum tone_mapping algo, float tone_mapping_param,
                     float tone_mapping_desat, bool use_detected_peak,
                     bool gamut_warning, bool is_linear);
 
 void pass_sample_deband(struct gl_shader_cache *sc, struct deband_opts *opts,
-                        AVLFG *lfg, enum mp_csp_trc trc);
+                        AVLFG *lfg, enum pl_color_transfer trc);
 
 void pass_sample_unsharp(struct gl_shader_cache *sc, float param);
 

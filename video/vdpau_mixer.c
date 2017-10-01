@@ -193,18 +193,19 @@ static int create_vdp_mixer(struct mp_vdpau_mixer *mixer,
     if (!opts->chroma_deint)
         SET_VIDEO_ATTR(SKIP_CHROMA_DEINTERLACE, uint8_t, 1);
 
-    struct mp_cmat yuv2rgb;
+    struct pl_color_transform yuv2rgb;
     VdpCSCMatrix matrix;
 
-    struct mp_csp_params cparams = MP_CSP_PARAMS_DEFAULTS;
-    mp_csp_set_image_params(&cparams, &mixer->image_params);
+    struct pl_color csp = mp_csp_from_image_params(&mixer->image_params);
+    struct pl_color_adjustment cparams = pl_color_adjustment_neutral;
+    enum pl_color_levels levels;
     if (mixer->video_eq)
-        mp_csp_equalizer_state_get(mixer->video_eq, &cparams);
-    mp_get_csp_matrix(&cparams, &yuv2rgb);
+        mp_csp_equalizer_state_get(mixer->video_eq, &cparams, &levels);
+    yuv2rgb = pl_get_yuv2rgb_matrix(csp, cparams, 8, 8, levels);
 
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 3; c++)
-            matrix[r][c] = yuv2rgb.m[r][c];
+            matrix[r][c] = yuv2rgb.mat.m[r][c];
         matrix[r][3] = yuv2rgb.c[r];
     }
 

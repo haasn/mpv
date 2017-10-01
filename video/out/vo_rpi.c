@@ -586,12 +586,12 @@ static int query_format(struct vo *vo, int format)
     return format == IMGFMT_MMAL || format == IMGFMT_420P;
 }
 
-static MMAL_FOURCC_T map_csp(enum mp_csp csp)
+static MMAL_FOURCC_T map_csp(enum pl_color_space csp)
 {
     switch (csp) {
-    case MP_CSP_BT_601:     return MMAL_COLOR_SPACE_ITUR_BT601;
-    case MP_CSP_BT_709:     return MMAL_COLOR_SPACE_ITUR_BT709;
-    case MP_CSP_SMPTE_240M: return MMAL_COLOR_SPACE_SMPTE240M;
+    case PL_COLOR_BT_601:     return MMAL_COLOR_SPACE_ITUR_BT601;
+    case PL_COLOR_BT_709:     return MMAL_COLOR_SPACE_ITUR_BT709;
+    case PL_COLOR_SMPTE_240M: return MMAL_COLOR_SPACE_SMPTE240M;
     default:                return MMAL_COLOR_SPACE_UNKNOWN;
     }
 }

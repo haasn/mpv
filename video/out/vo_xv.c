@@ -404,8 +404,10 @@ static void read_xv_csp(struct vo *vo)
     struct xvctx *ctx = vo->priv;
     ctx->cached_csp = 0;
     int bt709_enabled;
-    if (xv_get_eq(vo, ctx->xv_port, "bt_709", &bt709_enabled))
-        ctx->cached_csp = bt709_enabled == 100 ? MP_CSP_BT_709 : MP_CSP_BT_601;
+    if (xv_get_eq(vo, ctx->xv_port, "bt_709", &bt709_enabled)) {
+        ctx->cached_csp = bt709_enabled == 100 ? PL_COLOR_SPACE_BT_709
+                                               : PL_COLOR_SPACE_BT_601;
+    }
 }
 
 
@@ -525,7 +527,7 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
     ctx->current_buf = 0;
     ctx->current_ip_buf = 0;
 
-    int is_709 = params->color.space == MP_CSP_BT_709;
+    int is_709 = params->color.space == PL_COLOR_SPACE_BT_709;
     xv_set_eq(vo, ctx->xv_port, "bt_709", is_709 * 200 - 100);
     read_xv_csp(vo);
 

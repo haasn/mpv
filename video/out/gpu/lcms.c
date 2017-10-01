@@ -46,8 +46,8 @@ struct gl_lcms {
     char *current_profile;
     bool using_memory_profile;
     bool changed;
-    enum mp_csp_prim current_prim;
-    enum mp_csp_trc current_trc;
+    enum pl_color_primaries current_prim;
+    enum pl_color_transfer current_trc;
 
     struct mp_log *log;
     struct mpv_global *global;
@@ -206,8 +206,9 @@ static bool vid_profile_eq(struct AVBufferRef *a, struct AVBufferRef *b)
 
 // Return whether the profile or config has changed since the last time it was
 // retrieved. If it has changed, gl_lcms_get_lut3d() should be called.
-bool gl_lcms_has_changed(struct gl_lcms *p, enum mp_csp_prim prim,
-                         enum mp_csp_trc trc, struct AVBufferRef *vid_profile)
+bool gl_lcms_has_changed(struct gl_lcms *p, enum pl_color_primaries prim,
+                         enum pl_color_transfer trc,
+                         struct AVBufferRef *vid_profile)
 {
     if (p->changed || p->current_prim != prim || p->current_trc != trc)
         return true;
@@ -224,7 +225,8 @@ bool gl_lcms_has_profile(struct gl_lcms *p)
 
 static cmsHPROFILE get_vid_profile(struct gl_lcms *p, cmsContext cms,
                                    cmsHPROFILE disp_profile,
-                                   enum mp_csp_prim prim, enum mp_csp_trc trc)
+                                   enum pl_color_primaries prim,
+                                   enum pl_color_transfer trc)
 {
     if (p->opts->use_embedded && p->vid_profile) {
         // Try using the embedded ICC profile
@@ -241,7 +243,7 @@ static cmsHPROFILE get_vid_profile(struct gl_lcms *p, cmsContext cms,
 
     // The input profile for the transformation is dependent on the video
     // primaries and transfer characteristics
-    struct mp_csp_primaries csp = mp_get_csp_primaries(prim);
+    struct pl_raw_primaries csp = pl_raw_primaries_get(prim);
     cmsCIExyY wp_xyY = {csp.white.x, csp.white.y, 1.0};
     cmsCIExyYTRIPLE prim_xyY = {
         .Red   = {csp.red.x,   csp.red.y,   1.0},
@@ -251,29 +253,29 @@ static cmsHPROFILE get_vid_profile(struct gl_lcms *p, cmsContext cms,
 
     cmsToneCurve *tonecurve[3] = {0};
     switch (trc) {
-    case MP_CSP_TRC_LINEAR:  tonecurve[0] = cmsBuildGamma(cms, 1.0); break;
-    case MP_CSP_TRC_GAMMA18: tonecurve[0] = cmsBuildGamma(cms, 1.8); break;
-    case MP_CSP_TRC_GAMMA22: tonecurve[0] = cmsBuildGamma(cms, 2.2); break;
-    case MP_CSP_TRC_GAMMA28: tonecurve[0] = cmsBuildGamma(cms, 2.8); break;
+    case PL_COLOR_TRC_LINEAR:  tonecurve[0] = cmsBuildGamma(cms, 1.0); break;
+    case PL_COLOR_TRC_GAMMA18: tonecurve[0] = cmsBuildGamma(cms, 1.8); break;
+    case PL_COLOR_TRC_GAMMA22: tonecurve[0] = cmsBuildGamma(cms, 2.2); break;
+    case PL_COLOR_TRC_GAMMA28: tonecurve[0] = cmsBuildGamma(cms, 2.8); break;
 
-    case MP_CSP_TRC_SRGB:
+    case PL_COLOR_TRC_SRGB:
         // Values copied from Little-CMS
         tonecurve[0] = cmsBuildParametricToneCurve(cms, 4,
                 (double[5]){2.40, 1/1.055, 0.055/1.055, 1/12.92, 0.04045});
         break;
 
-    case MP_CSP_TRC_PRO_PHOTO:
+    case PL_COLOR_TRC_PRO_PHOTO:
         tonecurve[0] = cmsBuildParametricToneCurve(cms, 4,
                 (double[5]){1.8, 1.0, 0.0, 1/16.0, 0.03125});
         break;
 
-    case MP_CSP_TRC_BT_1886: {
+    case PL_COLOR_TRC_BT_1886: {
         // To build an appropriate BT.1886 transformation we need access to
         // the display's black point, so we LittleCMS' detection function.
         // Relative colorimetric is used since we want to approximate the
         // BT.1886 to the target device's actual black point even in e.g.
         // perceptual mode
-        const int intent = MP_INTENT_RELATIVE_COLORIMETRIC;
+        const int intent = PL_INTENT_RELATIVE_COLORIMETRIC;
         cmsCIEXYZ bp_XYZ;
         if (!cmsDetectBlackPoint(&bp_XYZ, disp_profile, intent, 0))
             return false;
@@ -342,7 +344,7 @@ static cmsHPROFILE get_vid_profile(struct gl_lcms *p, cmsContext cms,
 }
 
 bool gl_lcms_get_lut3d(struct gl_lcms *p, struct lut3d **result_lut3d,
-                       enum mp_csp_prim prim, enum mp_csp_trc trc,
+                       enum pl_color_primaries prim, enum pl_color_transfer trc,
                        struct AVBufferRef *vid_profile)
 {
     int s_r, s_g, s_b;
@@ -510,8 +512,9 @@ struct gl_lcms *gl_lcms_init(void *talloc_ctx, struct mp_log *log,
 void gl_lcms_update_options(struct gl_lcms *p) { }
 bool gl_lcms_set_memory_profile(struct gl_lcms *p, bstr profile) {return false;}
 
-bool gl_lcms_has_changed(struct gl_lcms *p, enum mp_csp_prim prim,
-                         enum mp_csp_trc trc, struct AVBufferRef *vid_profile)
+bool gl_lcms_has_changed(struct gl_lcms *p, enum pl_color_primaries prim,
+                         enum pl_color_transfer trc,
+                         struct AVBufferRef *vid_profile)
 {
     return false;
 }
@@ -522,7 +525,7 @@ bool gl_lcms_has_profile(struct gl_lcms *p)
 }
 
 bool gl_lcms_get_lut3d(struct gl_lcms *p, struct lut3d **result_lut3d,
-                       enum mp_csp_prim prim, enum mp_csp_trc trc,
+                       enum pl_color_primaries prim, enum pl_color_transfer trc,
                        struct AVBufferRef *vid_profile)
 {
     return false;

@@ -477,7 +477,7 @@ void mp_image_copy(struct mp_image *dst, struct mp_image *src)
     mp_image_copy_cb(dst, src, memcpy);
 }
 
-static enum mp_csp mp_image_params_get_forced_csp(struct mp_image_params *params)
+static enum pl_color_space mp_image_params_get_forced_csp(struct mp_image_params *params)
 {
     int imgfmt = params->hw_subfmt ? params->hw_subfmt : params->imgfmt;
     return mp_imgfmt_get_forced_csp(imgfmt);
@@ -501,7 +501,7 @@ void mp_image_copy_attributes(struct mp_image *dst, struct mp_image *src)
     // ensure colorspace consistency
     if (mp_image_params_get_forced_csp(&dst->params) !=
         mp_image_params_get_forced_csp(&src->params))
-        dst->params.color = (struct mp_colorspace){0};
+        dst->params.color = (struct pl_color){0};
     if ((dst->fmt.flags & MP_IMGFLAG_PAL) && (src->fmt.flags & MP_IMGFLAG_PAL)) {
         if (dst->planes[1] && src->planes[1]) {
             if (mp_image_make_writeable(dst))
@@ -620,7 +620,7 @@ char *mp_image_params_to_str_buf(char *b, size_t bs,
         mp_snprintf_cat(b, bs, " %s/%s/%s/%s",
                         m_opt_choice_str(mp_csp_names, p->color.space),
                         m_opt_choice_str(mp_csp_prim_names, p->color.primaries),
-                        m_opt_choice_str(mp_csp_trc_names, p->color.gamma),
+                        m_opt_choice_str(mp_csp_trc_names, p->color.transfer),
                         m_opt_choice_str(mp_csp_levels_names, p->color.levels));
         if (p->color.sig_peak)
             mp_snprintf_cat(b, bs, " SP=%f", p->color.sig_peak);
@@ -690,7 +690,7 @@ bool mp_image_params_equal(const struct mp_image_params *p1,
            p1->hw_subfmt == p2->hw_subfmt &&
            p1->w == p2->w && p1->h == p2->h &&
            p1->p_w == p2->p_w && p1->p_h == p2->p_h &&
-           mp_colorspace_equal(p1->color, p2->color) &&
+           pl_color_equal(p1->color, p2->color) &&
            p1->chroma_location == p2->chroma_location &&
            p1->rotate == p2->rotate &&
            p1->stereo_in == p2->stereo_in &&
@@ -708,7 +708,7 @@ void mp_image_set_attributes(struct mp_image *image,
     nparams.w = image->w;
     nparams.h = image->h;
     if (nparams.imgfmt != params->imgfmt)
-        nparams.color = (struct mp_colorspace){0};
+        nparams.color = (struct pl_color){0};
     mp_image_set_params(image, &nparams);
 }
 
@@ -717,58 +717,57 @@ void mp_image_set_attributes(struct mp_image *image,
 // the colorspace as implied by the pixel format.
 void mp_image_params_guess_csp(struct mp_image_params *params)
 {
-    enum mp_csp forced_csp = mp_image_params_get_forced_csp(params);
-    if (forced_csp == MP_CSP_AUTO) { // YUV/other
-        if (params->color.space != MP_CSP_BT_601 &&
-            params->color.space != MP_CSP_BT_709 &&
-            params->color.space != MP_CSP_BT_2020_NC &&
-            params->color.space != MP_CSP_BT_2020_C &&
-            params->color.space != MP_CSP_SMPTE_240M &&
-            params->color.space != MP_CSP_YCGCO)
-        {
+    enum pl_color_space forced_csp = mp_image_params_get_forced_csp(params);
+    if (forced_csp == PL_COLOR_SPACE_UNKNOWN) { // YUV/other
+        if (!pl_color_space_is_ycbcr_like(params->color.space)) {
             // Makes no sense, so guess instead
             // YCGCO should be separate, but libavcodec disagrees
-            params->color.space = MP_CSP_AUTO;
+            params->color.space = PL_COLOR_SPACE_UNKNOWN;
         }
-        if (params->color.space == MP_CSP_AUTO)
-            params->color.space = mp_csp_guess_colorspace(params->w, params->h);
-        if (params->color.levels == MP_CSP_LEVELS_AUTO) {
-            if (params->color.gamma == MP_CSP_TRC_V_LOG) {
-                params->color.levels = MP_CSP_LEVELS_PC;
+        if (!params->color.space)
+            params->color.space = pl_color_space_guess_ycbcr(params->w, params->h);
+        if (!params->color.levels) {
+            // V-Log is an odd-ball transfer that always uses PC range encoding,
+            // and doesn't allow anything else
+            if (params->color.transfer == PL_COLOR_TRC_V_LOG) {
+                params->color.levels = PL_COLOR_LEVELS_PC;
             } else {
-                params->color.levels = MP_CSP_LEVELS_TV;
+                params->color.levels = PL_COLOR_LEVELS_TV;
             }
         }
-        if (params->color.primaries == MP_CSP_PRIM_AUTO) {
+        if (!params->color.primaries) {
             // Guess based on the colormatrix as a first priority
-            if (params->color.space == MP_CSP_BT_2020_NC ||
-                params->color.space == MP_CSP_BT_2020_C) {
-                params->color.primaries = MP_CSP_PRIM_BT_2020;
-            } else if (params->color.space == MP_CSP_BT_709) {
-                params->color.primaries = MP_CSP_PRIM_BT_709;
+            if (params->color.space == PL_COLOR_SPACE_BT_2020_NC ||
+                params->color.space == PL_COLOR_SPACE_BT_2020_C)
+            {
+                params->color.primaries = PL_COLOR_PRIM_BT_2020;
+            } else if (params->color.space == PL_COLOR_SPACE_BT_709) {
+                params->color.primaries = PL_COLOR_PRIM_BT_709;
             } else {
                 // Ambiguous colormatrix for BT.601, guess based on res
-                params->color.primaries = mp_csp_guess_primaries(params->w, params->h);
+                params->color.primaries = pl_color_primaries_guess(params->w,
+                                                                   params->h);
             }
         }
-        if (params->color.gamma == MP_CSP_TRC_AUTO)
-            params->color.gamma = MP_CSP_TRC_BT_1886;
-    } else if (forced_csp == MP_CSP_RGB) {
-        params->color.space = MP_CSP_RGB;
-        params->color.levels = MP_CSP_LEVELS_PC;
+        if (!params->color.transfer)
+            params->color.transfer = PL_COLOR_TRC_BT_1886;
+
+    } else if (forced_csp == PL_COLOR_SPACE_RGB) {
+        params->color.space = PL_COLOR_SPACE_RGB;
+        params->color.levels = PL_COLOR_LEVELS_PC;
 
         // The majority of RGB content is either sRGB or (rarely) some other
         // color space which we don't even handle, like AdobeRGB or
         // ProPhotoRGB. The only reasonable thing we can do is assume it's
         // sRGB and hope for the best, which should usually just work out fine.
         // Note: sRGB primaries = BT.709 primaries
-        if (params->color.primaries == MP_CSP_PRIM_AUTO)
-            params->color.primaries = MP_CSP_PRIM_BT_709;
-        if (params->color.gamma == MP_CSP_TRC_AUTO)
-            params->color.gamma = MP_CSP_TRC_SRGB;
-    } else if (forced_csp == MP_CSP_XYZ) {
-        params->color.space = MP_CSP_XYZ;
-        params->color.levels = MP_CSP_LEVELS_PC;
+        if (!params->color.primaries)
+            params->color.primaries = PL_COLOR_PRIM_BT_709;
+        if (!params->color.transfer)
+            params->color.transfer = PL_COLOR_TRC_SRGB;
+    } else if (forced_csp == PL_COLOR_SPACE_XYZ) {
+        params->color.space = PL_COLOR_SPACE_XYZ;
+        params->color.levels = PL_COLOR_LEVELS_PC;
 
         // The default XYZ matrix converts it to BT.709 color space
         // since that's the most likely scenario. Proper VOs should ignore
@@ -778,35 +777,37 @@ void mp_image_params_guess_csp(struct mp_image_params *params)
         // gamut for VOs which *do* use the specialized XYZ matrix but don't
         // know any better output gamut other than whatever the source is
         // tagged with.
-        if (params->color.primaries == MP_CSP_PRIM_AUTO)
-            params->color.primaries = MP_CSP_PRIM_BT_709;
-        if (params->color.gamma == MP_CSP_TRC_AUTO)
-            params->color.gamma = MP_CSP_TRC_LINEAR;
+        if (!params->color.primaries)
+            params->color.primaries = PL_COLOR_PRIM_BT_709;
+        if (!params->color.transfer)
+            params->color.transfer = PL_COLOR_TRC_LINEAR;
     } else {
         // We have no clue.
-        params->color.space = MP_CSP_AUTO;
-        params->color.levels = MP_CSP_LEVELS_AUTO;
-        params->color.primaries = MP_CSP_PRIM_AUTO;
-        params->color.gamma = MP_CSP_TRC_AUTO;
+        params->color.space = PL_COLOR_SPACE_UNKNOWN;
+        params->color.levels = PL_COLOR_LEVELS_UNKNOWN;
+        params->color.primaries = PL_COLOR_PRIM_UNKNOWN;
+        params->color.transfer = PL_COLOR_TRC_UNKNOWN;
     }
 
     if (!params->color.sig_peak) {
-        if (params->color.gamma == MP_CSP_TRC_HLG) {
-            params->color.sig_peak = 1000 / MP_REF_WHITE; // reference display
+        if (params->color.transfer == PL_COLOR_TRC_HLG) {
+            // HLG reference peak is 1000 cd/m²
+            params->color.sig_peak = 1000 / PL_COLOR_REF_WHITE;
         } else {
             // If the signal peak is unknown, we're forced to pick the TRC's
             // nominal range as the signal peak to prevent clipping
-            params->color.sig_peak = mp_trc_nom_peak(params->color.gamma);
+            params->color.sig_peak =
+                pl_color_transfer_nominal_peak(params->color.transfer);
         }
     }
 
-    if (params->color.light == MP_CSP_LIGHT_AUTO) {
+    if (!params->color.light) {
         // HLG is always scene-referred (using its own OOTF), everything else
         // we assume is display-refered by default.
-        if (params->color.gamma == MP_CSP_TRC_HLG) {
-            params->color.light = MP_CSP_LIGHT_SCENE_HLG;
+        if (params->color.transfer == PL_COLOR_TRC_HLG) {
+            params->color.light = PL_COLOR_LIGHT_SCENE_HLG;
         } else {
-            params->color.light = MP_CSP_LIGHT_DISPLAY;
+            params->color.light = PL_COLOR_LIGHT_DISPLAY;
         }
     }
 }
@@ -842,11 +843,11 @@ static void mp_image_copy_fields_from_av_frame(struct mp_image *dst,
         dst->params.hw_subfmt = pixfmt2imgfmt(fctx->sw_format);
     }
 
-    dst->params.color = (struct mp_colorspace){
+    dst->params.color = (struct pl_color){
         .space = avcol_spc_to_mp_csp(src->colorspace),
         .levels = avcol_range_to_mp_csp_levels(src->color_range),
         .primaries = avcol_pri_to_mp_csp_prim(src->color_primaries),
-        .gamma = avcol_trc_to_mp_csp_trc(src->color_trc),
+        .transfer = avcol_trc_to_mp_csp_trc(src->color_trc),
     };
 
     dst->params.chroma_location = avchroma_location_to_mp(src->chroma_location);
@@ -891,7 +892,7 @@ static void mp_image_copy_fields_to_av_frame(struct AVFrame *dst,
     dst->color_range = mp_csp_levels_to_avcol_range(src->params.color.levels);
     dst->color_primaries =
         mp_csp_prim_to_avcol_pri(src->params.color.primaries);
-    dst->color_trc = mp_csp_trc_to_avcol_trc(src->params.color.gamma);
+    dst->color_trc = mp_csp_trc_to_avcol_trc(src->params.color.transfer);
 
     dst->chroma_location = mp_chroma_location_to_av(src->params.chroma_location);
 

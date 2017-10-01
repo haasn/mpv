@@ -44,8 +44,8 @@ struct sub_cache {
 struct part {
     int change_id;
     int imgfmt;
-    enum mp_csp colorspace;
-    enum mp_csp_levels levels;
+    enum pl_color_space colorspace;
+    enum pl_color_levels levels;
     int num_imgs;
     struct sub_cache *imgs;
 };
@@ -249,17 +249,15 @@ static void draw_rgba(struct mp_draw_sub_cache *cache, struct mp_rect bb,
 static void draw_ass(struct mp_draw_sub_cache *cache, struct mp_rect bb,
                      struct mp_image *temp, int bits, struct sub_bitmaps *sbs)
 {
-    struct mp_csp_params cspar = MP_CSP_PARAMS_DEFAULTS;
-    mp_csp_set_image_params(&cspar, &temp->params);
-    cspar.levels_out = MP_CSP_LEVELS_PC; // RGB (libass.color)
-    cspar.input_bits = bits;
-    cspar.texture_bits = (bits + 7) / 8 * 8;
-
-    struct mp_cmat yuv2rgb, rgb2yuv;
+    struct pl_color_transform yuv2rgb, rgb2yuv;
     bool need_conv = temp->fmt.flags & MP_IMGFLAG_YUV;
+    int tex_bits = (bits + 7) / 8 * 8;
+
     if (need_conv) {
-        mp_get_csp_matrix(&cspar, &yuv2rgb);
-        mp_invert_cmat(&rgb2yuv, &yuv2rgb);
+        struct pl_color csp = mp_csp_from_image_params(&temp->params);
+        yuv2rgb = pl_get_yuv2rgb_matrix(csp, pl_color_adjustment_neutral,
+                                        bits, tex_bits, PL_COLOR_LEVELS_PC);
+        rgb2yuv = pl_color_transform_invert(yuv2rgb);
     }
 
     for (int i = 0; i < sbs->num_parts; ++i) {
@@ -277,7 +275,7 @@ static void draw_ass(struct mp_draw_sub_cache *cache, struct mp_rect bb,
         int color_yuv[3];
         if (need_conv) {
             int rgb[3] = {r, g, b};
-            mp_map_fixp_color(&rgb2yuv, 8, rgb, cspar.texture_bits, color_yuv);
+            mp_map_fixp_color(8, rgb, tex_bits, color_yuv, rgb2yuv);
         } else {
             color_yuv[0] = g;
             color_yuv[1] = b;

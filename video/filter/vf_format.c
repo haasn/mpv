@@ -98,13 +98,13 @@ static int reconfig(struct vf_instance *vf, struct mp_image_params *in,
     if (p->primaries)
         out->color.primaries = p->primaries;
     if (p->gamma) {
-        out->color.gamma = p->gamma;
-        if (in->color.gamma != out->color.gamma) {
+        out->color.transfer = p->gamma;
+        if (in->color.transfer != out->color.transfer) {
             // When changing the gamma function explicitly, also reset stuff
             // related to the gamma function since that information will almost
             // surely be false now and have to be re-inferred
             out->color.sig_peak = 0.0;
-            out->color.light = MP_CSP_LIGHT_AUTO;
+            out->color.light = PL_COLOR_LIGHT_UNKNOWN;
         }
     }
     if (p->sig_peak)

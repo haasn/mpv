@@ -108,7 +108,7 @@ typedef struct mkv_track {
     double v_frate;
     uint32_t colorspace;
     int stereo_mode;
-    struct mp_colorspace color;
+    struct pl_color color;
     struct mp_spherical_params spherical;
 
     uint32_t a_channels, a_bps;
@@ -561,9 +561,9 @@ static void parse_trackcolour(struct demuxer *demuxer, struct mkv_track *track,
                    m_opt_choice_str(mp_csp_prim_names, track->color.primaries));
     }
     if (colour->n_transfer_characteristics) {
-        track->color.gamma = avcol_trc_to_mp_csp_trc(colour->transfer_characteristics);
-        MP_VERBOSE(demuxer, "|    + Gamma: %s\n",
-                   m_opt_choice_str(mp_csp_trc_names, track->color.gamma));
+        track->color.transfer = avcol_trc_to_mp_csp_trc(colour->transfer_characteristics);
+        MP_VERBOSE(demuxer, "|    + Transfer: %s\n",
+                   m_opt_choice_str(mp_csp_trc_names, track->color.transfer));
     }
     if (colour->n_range) {
         track->color.levels = avcol_range_to_mp_csp_levels(colour->range);
@@ -571,7 +571,7 @@ static void parse_trackcolour(struct demuxer *demuxer, struct mkv_track *track,
                    m_opt_choice_str(mp_csp_levels_names, track->color.levels));
     }
     if (colour->n_max_cll) {
-        track->color.sig_peak = colour->max_cll / MP_REF_WHITE;
+        track->color.sig_peak = colour->max_cll / PL_COLOR_REF_WHITE;
         MP_VERBOSE(demuxer, "|    + MaxCLL: %"PRIu64"\n", colour->max_cll);
     }
     // if MaxCLL is unavailable, try falling back to the mastering metadata
@@ -579,7 +579,7 @@ static void parse_trackcolour(struct demuxer *demuxer, struct mkv_track *track,
         struct ebml_mastering_metadata *mastering = &colour->mastering_metadata;
 
         if (mastering->n_luminance_max) {
-            track->color.sig_peak = mastering->luminance_max / MP_REF_WHITE;
+            track->color.sig_peak = mastering->luminance_max / PL_COLOR_REF_WHITE;
             MP_VERBOSE(demuxer, "|    + HDR peak: %f\n", track->color.sig_peak);
         }
     }

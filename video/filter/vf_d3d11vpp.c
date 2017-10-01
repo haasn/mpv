@@ -217,15 +217,15 @@ static int recreate_video_proc(struct vf_instance *vf)
                                                          FALSE, 0);
 
     D3D11_VIDEO_PROCESSOR_COLOR_SPACE csp = {
-        .YCbCr_Matrix = p->params.color.space != MP_CSP_BT_601,
-        .Nominal_Range = p->params.color.levels == MP_CSP_LEVELS_TV ? 1 : 2,
+        .YCbCr_Matrix = p->params.color.space != PL_COLOR_BT_601,
+        .Nominal_Range = p->params.color.levels == PL_COLOR_LEVELS_TV ? 1 : 2,
     };
     ID3D11VideoContext_VideoProcessorSetStreamColorSpace(p->video_ctx,
                                                          p->video_proc,
                                                          0, &csp);
     if (p->out_rgb) {
-        if (p->params.color.space != MP_CSP_BT_601 &&
-            p->params.color.space != MP_CSP_BT_709)
+        if (p->params.color.space != PL_COLOR_BT_601 &&
+            p->params.color.space != PL_COLOR_BT_709)
         {
             MP_WARN(vf, "Unsupported video colorspace (%s/%s). Consider "
                     "disabling hardware decoding, or using "

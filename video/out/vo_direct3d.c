@@ -1168,7 +1168,7 @@ static int query_format(struct vo *vo, int movie_fmt)
 
 static void update_colorspace(d3d_priv *priv)
 {
-    struct mp_csp_params csp = MP_CSP_PARAMS_DEFAULTS;
+    struct mp_csp_params csp = PL_COLOR_PARAMS_DEFAULTS;
     mp_csp_set_image_params(&csp, &priv->params);
 
     if (priv->use_shaders) {

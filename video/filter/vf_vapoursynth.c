@@ -174,7 +174,7 @@ static void copy_mp_to_vs_frame_props_map(struct vf_priv_s *p, VSMap *map,
     p->vsapi->propSetInt(map, "_SARDen", params->p_h, 0);
     if (params->color.levels) {
         p->vsapi->propSetInt(map, "_ColorRange",
-                params->color.levels == MP_CSP_LEVELS_TV, 0);
+                params->color.levels == PL_COLOR_LEVELS_TV, 0);
     }
     // The docs explicitly say it uses libavcodec values.
     p->vsapi->propSetInt(map, "_ColorSpace",

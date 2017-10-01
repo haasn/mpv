@@ -1156,7 +1156,7 @@ void encode_lavc_fail(struct encode_lavc_context *ctx, const char *format, ...)
 }
 
 bool encode_lavc_set_csp(struct encode_lavc_context *ctx,
-                         AVCodecContext *codec, enum mp_csp csp)
+                         AVCodecContext *codec, enum pl_color_space csp)
 {
     CHECK_FAIL(ctx, NULL);
 
@@ -1171,7 +1171,7 @@ bool encode_lavc_set_csp(struct encode_lavc_context *ctx,
 }
 
 bool encode_lavc_set_csp_levels(struct encode_lavc_context *ctx,
-                                AVCodecContext *codec, enum mp_csp_levels lev)
+                                AVCodecContext *codec, enum pl_color_levels lev)
 {
     CHECK_FAIL(ctx, NULL);
 
@@ -1185,16 +1185,16 @@ bool encode_lavc_set_csp_levels(struct encode_lavc_context *ctx,
     return true;
 }
 
-enum mp_csp encode_lavc_get_csp(struct encode_lavc_context *ctx,
-                                AVCodecContext *codec)
+enum pl_color_space encode_lavc_get_csp(struct encode_lavc_context *ctx,
+                                        AVCodecContext *codec)
 {
     CHECK_FAIL(ctx, 0);
 
     return avcol_spc_to_mp_csp(codec->colorspace);
 }
 
-enum mp_csp_levels encode_lavc_get_csp_levels(struct encode_lavc_context *ctx,
-                                              AVCodecContext *codec)
+enum pl_color_levels encode_lavc_get_csp_levels(struct encode_lavc_context *ctx,
+                                                AVCodecContext *codec)
 {
     CHECK_FAIL(ctx, 0);
 

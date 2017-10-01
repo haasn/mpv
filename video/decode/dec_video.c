@@ -234,7 +234,7 @@ static void fix_image_params(struct dec_video *d_video,
     }
     p.stereo_out = opts->video_stereo_mode;
 
-    mp_colorspace_merge(&p.color, &c->color);
+    pl_color_merge(&p.color, &c->color);
 
     // Sanitize the HDR peak. Sadly necessary
     if (!is_valid_peak(p.color.sig_peak)) {

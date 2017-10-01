@@ -332,6 +332,9 @@ def build(ctx):
         ( "sub/sd_lavc.c" ),
         ( "sub/filter_sdh.c" ),
 
+        ## libplacebo components (XXX: preliminary)
+        ( "libplacebo/colorspace.c" ),
+
         ## Video
         ( "video/csputils.c" ),
         ( "video/fmt-conversion.c" ),

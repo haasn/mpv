@@ -709,7 +709,7 @@ static void update_image_params(struct dec_video *vd, AVFrame *frame,
     sd = av_frame_get_side_data(frame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
     if (sd) {
         AVContentLightMetadata *clm = (AVContentLightMetadata *)sd->data;
-        params->color.sig_peak = clm->MaxCLL / MP_REF_WHITE;
+        params->color.sig_peak = clm->MaxCLL / PL_COLOR_REF_WHITE;
     }
 #endif
 
@@ -719,7 +719,7 @@ static void update_image_params(struct dec_video *vd, AVFrame *frame,
     if (!params->color.sig_peak && sd) {
         AVMasteringDisplayMetadata *mdm = (AVMasteringDisplayMetadata *)sd->data;
         if (mdm->has_luminance)
-            params->color.sig_peak = av_q2d(mdm->max_luminance) / MP_REF_WHITE;
+            params->color.sig_peak = av_q2d(mdm->max_luminance) / PL_COLOR_REF_WHITE;
     }
 #endif
 
