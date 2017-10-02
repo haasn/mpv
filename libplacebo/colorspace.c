@@ -20,7 +20,7 @@
 #include <assert.h>
 #include <math.h>
 
-#include "colorspace.h"
+#include "public/colorspace.h"
 
 bool pl_color_space_is_ycbcr_like(enum pl_color_space space)
 {

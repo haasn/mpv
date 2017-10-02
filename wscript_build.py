@@ -334,6 +334,8 @@ def build(ctx):
 
         ## libplacebo components (XXX: preliminary)
         ( "libplacebo/colorspace.c" ),
+        ( "libplacebo/context.c" ),
+        ( "libplacebo/filters.c" ),
 
         ## Video
         ( "video/csputils.c" ),

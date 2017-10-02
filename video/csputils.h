@@ -21,7 +21,7 @@
 #include <stdint.h>
 
 #include "options/m_option.h"
-#include "libplacebo/colorspace.h"
+#include "libplacebo/public/colorspace.h"
 
 /* NOTE: the csp and levels UNKNOWN values are converted to specific ones
  * above vf/vo level. At least vf_scale relies on all valid settings being

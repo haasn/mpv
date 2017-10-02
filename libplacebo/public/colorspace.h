@@ -15,7 +15,8 @@
  * License along with libplacebo.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
+#ifndef LIBPLACEBO_COLORSPACE_H
+#define LIBPLACEBO_COLORSPACE_H
 
 #include <stdbool.h>
 
@@ -274,3 +275,5 @@ struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
                                                 struct pl_color_adjustment params,
                                                 int in_bits, int out_bits,
                                                 enum pl_color_levels out_levels);
+
+#endif // LIBPLACEBO_COLORSPACE_H
