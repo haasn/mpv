@@ -23,6 +23,19 @@ void pl_context_destroy(struct pl_context **ctx)
     TA_FREEP(ctx);
 }
 
+void pl_context_set_log_cb(struct pl_context *ctx, void *priv,
+                           void (*fun)(void *priv, enum pl_log_level level,
+                                       const char *msg))
+{
+    ctx->logfun = fun;
+    ctx->logpriv = priv;
+}
+
+void pl_context_set_log_level(struct pl_context *ctx, enum pl_log_level level)
+{
+    ctx->loglevel = level;
+}
+
 void pl_msg(struct pl_context *ctx, enum pl_log_level lev, const char *fmt, ...)
 {
     va_list va;

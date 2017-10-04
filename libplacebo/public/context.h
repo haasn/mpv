@@ -51,4 +51,10 @@ void pl_context_set_log_cb(struct pl_context *ctx, void *priv,
                            void (*fun)(void *priv, enum pl_log_level level,
                                        const char *msg));
 
+// Set the maximum log level for which messages will be delivered to the log
+// callback. Setting this to PL_LOG_ALL means all messages will be forwarded,
+// but doing so indiscriminately can result in decreased performance as
+// debugging code paths are enabled based on the configured log level.
+void pl_context_set_log_level(struct pl_context *ctx, enum pl_log_level level);
+
 #endif // LIBPLACEBO_CONTEXT_H
