@@ -38,6 +38,10 @@ Interface changes
     - remove the (deprecated) alias --gpu-context=drm-egl
     - remove the (deprecated) --vo=opengl-hq
     - remove --opengl-es=force2 (use --opengl-es=yes --opengl-restrict=300)
+    - remove the special scaler presets ewa_lanczossharp and ewa_lanczossoft,
+      and redefine ewa_lanczos to use the true jinc radius instead (the old
+      ewa_lanczos can be recovered using --scale-radius=3, and the old
+      ewa_lanczossharp/ewa_lanczossoft can be recovered using --scale-blur)
  --- mpv 0.27.0 ---
     - drop previously deprecated --field-dominance option
     - drop previously deprecated "osd" command

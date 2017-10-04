@@ -135,6 +135,10 @@ struct pl_named_filter_function {
 // terminated by a single {0} entry.
 extern const struct pl_named_filter_function pl_named_filter_functions[];
 
+// Returns a filter function with a given name, or NULL on failure. Safe to
+// call on name = NULL.
+const struct pl_named_filter_function *pl_find_named_filter_function(const char *name);
+
 // Represents a particular configuration/combination of filter functions to
 // form a filter.
 struct pl_filter_config {
@@ -147,12 +151,12 @@ struct pl_filter_config {
     // between will be linearly scaled.
     float clamp;
 
-    // Represents the effective radius at which the filter will be computed. If
-    // no additional blurring/sharpening of the filter is required, this should
-    // be equal to the kernel's radius. The window function will always be
-    // stretched onto this radius. If left as 0.0, defaults to the kernel's
-    // radius.
-    float radius;
+    // Additional blur coefficient. This effectively stretches the kernel,
+    // without changing the effective radius of the filter radius. Setting this
+    // to a value of 0.0 is equivalent to disabling it. Values significantly
+    // below 1.0 may seriously degrade the visual output, and should be used
+    // with care.
+    float blur;
 
     // Additional taper coefficient. This essentially flattens the function's
     // center. The values within [-taper, taper] will return 1.0, with the
@@ -176,8 +180,8 @@ double pl_filter_sample(const struct pl_filter_config *c, double x);
 extern const struct pl_filter_config pl_filter_spline16;    // 2 taps
 extern const struct pl_filter_config pl_filter_spline36;    // 3 taps
 extern const struct pl_filter_config pl_filter_spline64;    // 4 taps
-extern const struct pl_filter_config pl_filter_nearest;     // kernel=box
-extern const struct pl_filter_config pl_filter_bilinear;    // kernel=triangle
+extern const struct pl_filter_config pl_filter_box;         // AKA nearest
+extern const struct pl_filter_config pl_filter_triangle;    // AKA bilinear
 extern const struct pl_filter_config pl_filter_gaussian;
 // Sinc family (all configured to 3 taps):
 extern const struct pl_filter_config pl_filter_sinc;        // unwindowed,
@@ -206,14 +210,19 @@ struct pl_named_filter_config {
 // terminated by a single {0} entry.
 extern const struct pl_named_filter_config pl_named_filters[];
 
+// Returns a filter config with a given name, or NULL on failure. Safe to call
+// on name = NULL.
+const struct pl_named_filter_config *pl_find_named_filter(const char *name);
+
 // Parameters for filter generation.
 struct pl_filter_params {
-    // The particular filter configuration to be sampled.
+    // The particular filter configuration to be sampled. config.kernel must
+    // be set to a valid pl_filter_function.
     struct pl_filter_config config;
 
-    // The precision of the resultign LUT. A value of 64 should be fine for
+    // The precision of the resulting LUT. A value of 64 should be fine for
     // most practical purposes, but higher or lower values may be justified
-    // depending on the use case. This value MUST be set to something > 0.
+    // depending on the use case. This value must be set to something > 0.
     int lut_entries;
 
     // When set to values above 1.0, the filter will be computed at a size
@@ -234,6 +243,12 @@ struct pl_filter_params {
     // Indicates the maximum row size that is supported by the calling code, or
     // 0 for no limit.
     int max_row_size;
+
+    // Indicates the row stride alignment. For some use cases (e.g. uploading
+    // the weights as a texture), there are certain alignment requirements for
+    // each row. The chosen row_size will always be a multiple of this value.
+    // Specifying 0 indicates no alignment requirements.
+    int row_stride_align;
 };
 
 // Represents an initialized instance of a particular filter, with a
@@ -253,7 +268,7 @@ struct pl_filter {
     // as a 1D array with dimensions [lut_entries] containing the raw filter
     // samples on the scale [0, radius]. For separable (non-polar) filters,
     // this is interpreted as a 2D array with dimensions
-    // [lut_entries][row_size]. The inner rows contain the `row_size` samples
+    // [lut_entries][row_stride]. The inner rows contain the `row_size` samples
     // to convolve with the corresponding input pixels. The outer coordinate is
     // used to very the fractional offset (phase). So for example, if the
     // sample position to reconstruct is directly aligned with the source
@@ -278,14 +293,21 @@ struct pl_filter {
     // cut off because of this, the bool `insufficient` will be set to true.
     int row_size;
     bool insufficient;
+
+    // The separation (in *weights) between each row of the filter. Always
+    // a multiple of params.row_stride_align.
+    int row_stride;
 };
 
 // Generate (compute) a filter instance based on a given filter configuration.
 // The resulting pl_filter must be freed with `pl_filter_free` when no longer
-// needed.
+// needed. Returns NULL if filter generation fails due to invalid parameters
+// (i.e. missing a required parameter).
+// The resulting pl_filter is implicitly destroyed when the pl_context is
+// destroyed.
 const struct pl_filter *pl_filter_generate(struct pl_context *ctx,
                                        const struct pl_filter_params *params);
 
-void pl_filter_free(struct pl_filter *filter);
+void pl_filter_free(const struct pl_filter **filter);
 
 #endif // LIBPLACEBO_FILTER_KERNELS_H

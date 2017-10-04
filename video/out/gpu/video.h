@@ -26,13 +26,11 @@
 #include "lcms.h"
 #include "shader_cache.h"
 #include "video/csputils.h"
-#include "video/out/filter_kernels.h"
+#include "libplacebo/public/filters.h"
 
 struct scaler_fun {
     char *name;
-    float params[2];
-    float blur;
-    float taper;
+    float params[PL_FILTER_MAX_PARAMS];
 };
 
 struct scaler_config {
@@ -42,21 +40,17 @@ struct scaler_config {
     float antiring;
     float cutoff;
     float clamp;
+    float blur;
+    float taper;
 };
 
 struct scaler {
     int index;
-    struct scaler_config conf;
-    double scale_factor;
     bool initialized;
-    struct filter_kernel *kernel;
+    struct scaler_config conf;
+    const struct pl_filter *filter;
     struct ra_tex *lut;
     struct ra_tex *sep_fbo;
-    bool insufficient;
-    int lut_size;
-
-    // kernel points here
-    struct filter_kernel kernel_storage;
 };
 
 enum scaler_unit {

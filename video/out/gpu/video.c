@@ -25,6 +25,7 @@
 #include <libavutil/common.h>
 #include <libavutil/lfg.h>
 
+#include "libplacebo/context.h"
 #include "video.h"
 
 #include "misc/bstr.h"
@@ -38,7 +39,6 @@
 #include "stream/stream.h"
 #include "video_shaders.h"
 #include "user_shaders.h"
-#include "video/out/filter_kernels.h"
 #include "video/out/aspect.h"
 #include "video/out/dither.h"
 #include "video/out/vo.h"
@@ -47,20 +47,16 @@
 // Note that the convolution filters are not included in this list.
 static const char *const fixed_scale_filters[] = {
     "bilinear",
-    "bicubic_fast",
+    "bicubic",
     "oversample",
     NULL
 };
+
 static const char *const fixed_tscale_filters[] = {
     "oversample",
     "linear",
     NULL
 };
-
-// must be sorted, and terminated with 0
-int filter_sizes[] =
-    {2, 4, 6, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 0};
-int tscale_sizes[] = {2, 4, 6, 8, 0};
 
 struct vertex_pt {
     float x, y;
@@ -154,6 +150,7 @@ struct dr_buffer {
 
 struct gl_video {
     struct ra *ra;
+    struct pl_context *plctx;
 
     struct mpv_global *global;
     struct mp_log *log;
@@ -327,16 +324,16 @@ static int validate_window_opt(struct mp_log *log, const m_option_t *opt,
     OPT_STRING_VALIDATE(n, scaler[i].kernel.name, 0, validate_scaler_opt), \
     OPT_FLOAT(n"-param1", scaler[i].kernel.params[0], 0),                  \
     OPT_FLOAT(n"-param2", scaler[i].kernel.params[1], 0),                  \
-    OPT_FLOAT(n"-blur",   scaler[i].kernel.blur, 0),                       \
+    OPT_FLOAT(n"-blur",   scaler[i].blur, 0),                              \
     OPT_FLOATRANGE(n"-cutoff", scaler[i].cutoff, 0, 0.0, 1.0),             \
-    OPT_FLOATRANGE(n"-taper", scaler[i].kernel.taper, 0, 0.0, 1.0),        \
+    OPT_FLOATRANGE(n"-taper", scaler[i].taper, 0, 0.0, 1.0),               \
     OPT_FLOAT(n"-wparam", scaler[i].window.params[0], 0),                  \
-    OPT_FLOAT(n"-wblur",  scaler[i].window.blur, 0),                       \
-    OPT_FLOATRANGE(n"-wtaper", scaler[i].window.taper, 0, 0.0, 1.0),       \
     OPT_FLOATRANGE(n"-clamp", scaler[i].clamp, 0, 0.0, 1.0),               \
     OPT_FLOATRANGE(n"-radius",    scaler[i].radius, 0, 0.5, 16.0),         \
     OPT_FLOATRANGE(n"-antiring",  scaler[i].antiring, 0, 0.0, 1.0),        \
-    OPT_STRING_VALIDATE(n"-window", scaler[i].window.name, 0, validate_window_opt)
+    OPT_STRING_VALIDATE(n"-window", scaler[i].window.name, 0, validate_window_opt), \
+    OPT_REMOVED(n"-wblur", NULL),                                          \
+    OPT_REMOVED(n"-wtaper", NULL)
 
 const struct m_sub_options gl_video_conf = {
     .opts = (const m_option_t[]) {
@@ -1283,7 +1280,7 @@ static void uninit_scaler(struct gl_video *p, struct scaler *scaler)
 {
     ra_tex_free(p->ra, &scaler->sep_fbo);
     ra_tex_free(p->ra, &scaler->lut);
-    scaler->kernel = NULL;
+    pl_filter_free(&scaler->filter);
     scaler->initialized = false;
 }
 
@@ -1548,9 +1545,7 @@ static bool scaler_fun_eq(struct scaler_fun a, struct scaler_fun b)
 
     return ((!a.name && !b.name) || strcmp(a.name, b.name) == 0) &&
            double_seq(a.params[0], b.params[0]) &&
-           double_seq(a.params[1], b.params[1]) &&
-           a.blur == b.blur &&
-           a.taper == b.taper;
+           double_seq(a.params[1], b.params[1]);
 }
 
 static bool scaler_conf_eq(struct scaler_config a, struct scaler_config b)
@@ -1560,17 +1555,31 @@ static bool scaler_conf_eq(struct scaler_config a, struct scaler_config b)
     return scaler_fun_eq(a.kernel, b.kernel) &&
            scaler_fun_eq(a.window, b.window) &&
            a.radius == b.radius &&
-           a.clamp == b.clamp;
+           a.cutoff == b.cutoff &&
+           a.clamp == b.clamp &&
+           a.blur == b.blur &&
+           a.taper == b.taper;
+}
+
+static const char *find_fixed_scaler(const char *name, bool tscale)
+{
+    const char * const *fixed_filters =
+        tscale ? fixed_tscale_filters : fixed_scale_filters;
+
+    for (int i = 0; fixed_filters[i]; i++) {
+        if (strcmp(name, fixed_filters[i]) == 0)
+            return fixed_filters[i];
+    }
+
+    return NULL;
 }
 
 static void reinit_scaler(struct gl_video *p, struct scaler *scaler,
                           const struct scaler_config *conf,
-                          double scale_factor,
-                          int sizes[])
+                          float inv_scale, int max_size)
 {
-    if (scaler_conf_eq(scaler->conf, *conf) &&
-        scaler->scale_factor == scale_factor &&
-        scaler->initialized)
+    if (scaler_conf_eq(scaler->conf, *conf) && scaler->initialized &&
+        (!scaler->filter || scaler->filter->params.filter_scale == inv_scale))
         return;
 
     uninit_scaler(p, scaler);
@@ -1579,78 +1588,83 @@ static void reinit_scaler(struct gl_video *p, struct scaler *scaler,
     bool is_tscale = scaler->index == SCALER_TSCALE;
     scaler->conf.kernel.name = (char *)handle_scaler_opt(conf->kernel.name, is_tscale);
     scaler->conf.window.name = (char *)handle_scaler_opt(conf->window.name, is_tscale);
-    scaler->scale_factor = scale_factor;
-    scaler->insufficient = false;
     scaler->initialized = true;
 
-    const struct filter_kernel *t_kernel = mp_find_filter_kernel(conf->kernel.name);
-    if (!t_kernel)
+    const struct pl_named_filter_config *nfc = pl_find_named_filter(conf->kernel.name);
+    if (!nfc)
         return;
 
-    scaler->kernel_storage = *t_kernel;
-    scaler->kernel = &scaler->kernel_storage;
+    // Make mutable copies of the filter function and configuration so we can
+    // adjust the parameters if needed
+    struct pl_filter_config pl_config = *nfc->filter;
+    struct pl_filter_function kernel, window = {0};
+    assert(pl_config.kernel);
+    kernel = *pl_config.kernel;
+    pl_config.kernel = &kernel;
 
+    // Try to load the custom window if requested
     const char *win = conf->window.name;
-    if (!win || !win[0])
-        win = t_kernel->window; // fall back to the scaler's default window
-    const struct filter_window *t_window = mp_find_filter_window(win);
-    if (t_window)
-        scaler->kernel->w = *t_window;
-
-    for (int n = 0; n < 2; n++) {
-        if (!isnan(conf->kernel.params[n]))
-            scaler->kernel->f.params[n] = conf->kernel.params[n];
-        if (!isnan(conf->window.params[n]))
-            scaler->kernel->w.params[n] = conf->window.params[n];
+    if (win && win[0]) {
+        const struct pl_named_filter_function *nff =
+            pl_find_named_filter_function(win);
+        if (nff)
+            pl_config.window = nff->function;
     }
 
-    if (conf->kernel.blur > 0.0)
-        scaler->kernel->f.blur = conf->kernel.blur;
-    if (conf->window.blur > 0.0)
-        scaler->kernel->w.blur = conf->window.blur;
+    if (pl_config.window) {
+        window = *pl_config.window;
+        pl_config.window = &window;
+    }
 
-    if (conf->kernel.taper > 0.0)
-        scaler->kernel->f.taper = conf->kernel.taper;
-    if (conf->window.taper > 0.0)
-        scaler->kernel->w.taper = conf->window.taper;
+    if (conf->clamp > 0.0)
+        pl_config.clamp = conf->clamp;
+    if (conf->taper > 0.0)
+        pl_config.taper = conf->taper;
+    if (conf->blur > 0.0)
+        pl_config.blur = conf->blur;
 
-    if (scaler->kernel->f.resizable && conf->radius > 0.0)
-        scaler->kernel->f.radius = conf->radius;
+    if (conf->radius > 0.0 && kernel.resizable)
+        kernel.radius = conf->radius;
 
-    scaler->kernel->clamp = conf->clamp;
-    scaler->kernel->value_cutoff = conf->cutoff;
+    for (int n = 0; n < PL_FILTER_MAX_PARAMS; n++) {
+        if (!isnan(conf->kernel.params[n]))
+            kernel.params[n] = conf->kernel.params[n];
+        if (!isnan(conf->window.params[n]))
+            window.params[n] = conf->window.params[n];
+    }
 
-    scaler->insufficient = !mp_init_filter(scaler->kernel, sizes, scale_factor);
+    // For simplicity, just always align the row to 4 texels and force that
+    // texture format when not using polar sampling.
+    const int num_components = pl_config.polar ? 1 : 4;
+    struct pl_filter_params params = {
+        .config = pl_config,
+        .lut_entries = 1 << p->opts.scaler_lut_size,
+        .filter_scale = inv_scale,
+        .cutoff = conf->cutoff,
+        .max_row_size = max_size,
+        .row_stride_align = num_components,
+    };
 
-    int size = scaler->kernel->size;
-    int num_components = size > 2 ? 4 : size;
+    scaler->filter = pl_filter_generate(p->plctx, &params);
+    assert(scaler->filter); // only fails due to invalid usage
+
     const struct ra_format *fmt = ra_find_float16_format(p->ra, num_components);
     assert(fmt);
 
-    int width = (size + num_components - 1) / num_components; // round up
-    int stride = width * num_components;
-    assert(size <= stride);
-
-    scaler->lut_size = 1 << p->opts.scaler_lut_size;
-
-    float *weights = talloc_array(NULL, float, scaler->lut_size * stride);
-    mp_compute_lut(scaler->kernel, scaler->lut_size, stride, weights);
-
-    bool use_1d = scaler->kernel->polar && (p->ra->caps & RA_CAP_TEX_1D);
+    int width = scaler->filter->row_stride / num_components;
+    bool use_1d = params.config.polar && (p->ra->caps & RA_CAP_TEX_1D);
 
     struct ra_tex_params lut_params = {
         .dimensions = use_1d ? 1 : 2,
-        .w = use_1d ? scaler->lut_size : width,
-        .h = use_1d ? 1 : scaler->lut_size,
+        .w = params.config.polar ? params.lut_entries : width,
+        .h = params.config.polar ? 1 : params.lut_entries,
         .d = 1,
         .format = fmt,
         .render_src = true,
         .src_linear = true,
-        .initial_data = weights,
+        .initial_data = (void *)scaler->filter->weights,
     };
     scaler->lut = ra_tex_create(p->ra, &lut_params);
-
-    talloc_free(weights);
 
     debug_check_gl(p, "after initializing scaler");
 }
@@ -1694,7 +1708,7 @@ static void pass_dispatch_sample_polar(struct gl_video *p, struct scaler *scaler
     if ((p->ra->caps & reqs) != reqs)
         goto fallback;
 
-    int bound = ceil(scaler->kernel->radius_cutoff);
+    int bound = ceil(scaler->filter->radius_cutoff);
     int offset = bound - 1; // padding top/left
     int padding = offset + bound; // total padding
 
@@ -1735,9 +1749,9 @@ fallback:
 // thrashing, the scaler unit should usually use the same parameters.
 static void pass_sample(struct gl_video *p, struct image img,
                         struct scaler *scaler, const struct scaler_config *conf,
-                        double scale_factor, int w, int h)
+                        float inv_scale, int w, int h)
 {
-    reinit_scaler(p, scaler, conf, scale_factor, filter_sizes);
+    reinit_scaler(p, scaler, conf, inv_scale, 4 * p->ra->max_texture_wh);
 
     // Describe scaler
     const char *scaler_opt[] = {
@@ -1747,27 +1761,33 @@ static void pass_sample(struct gl_video *p, struct image img,
         [SCALER_TSCALE] = "tscale",
     };
 
-    pass_describe(p, "%s=%s (%s)", scaler_opt[scaler->index],
-                  scaler->conf.kernel.name, plane_names[img.type]);
+    const char *name = scaler->conf.kernel.name;
+    pass_describe(p, "%s=%s (%s)", scaler_opt[scaler->index], name,
+                  plane_names[img.type]);
 
-    bool is_separated = scaler->kernel && !scaler->kernel->polar;
+    bool is_polar     = scaler->filter && scaler->filter->params.config.polar;
+    bool is_separated = scaler->filter && !is_polar;
+    bool is_builtin = !!find_fixed_scaler(name, scaler->index == SCALER_TSCALE);
+
+    // Disable the built-in scalers when correct-downscaling is required
+    if (scaler->filter && scaler->filter->params.filter_scale > 1.0)
+        is_builtin = false;
 
     // Set up the transformation+prelude and bind the texture, for everything
     // other than separated scaling (which does this in the subfunction)
-    if (!is_separated)
+    if (!is_separated || is_builtin)
         sampler_prelude(p->sc, pass_bind(p, img));
 
     // Dispatch the scaler. They're all wildly different.
-    const char *name = scaler->conf.kernel.name;
-    if (strcmp(name, "bilinear") == 0) {
+    if (is_builtin && strcmp(name, "bilinear") == 0) {
         GLSL(color = texture(tex, pos);)
-    } else if (strcmp(name, "bicubic_fast") == 0) {
-        pass_sample_bicubic_fast(p->sc);
-    } else if (strcmp(name, "oversample") == 0) {
+    } else if (is_builtin && strcmp(name, "bicubic") == 0) {
+        pass_sample_bicubic(p->sc);
+    } else if (is_builtin && strcmp(name, "oversample") == 0) {
         pass_sample_oversample(p->sc, scaler, w, h);
-    } else if (scaler->kernel && scaler->kernel->polar) {
+    } else if (is_polar) {
         pass_dispatch_sample_polar(p, scaler, img, w, h);
-    } else if (scaler->kernel) {
+    } else if (is_separated) {
         pass_sample_separated(p, img, scaler, w, h);
     } else {
         // Should never happen
@@ -2276,7 +2296,7 @@ static void pass_scale_main(struct gl_video *p)
 
     bool downscaling = xy[0] < 1.0 || xy[1] < 1.0;
     bool upscaling = !downscaling && (xy[0] > 1.0 || xy[1] > 1.0);
-    double scale_factor = 1.0;
+    float inv_scale = 1.0;
 
     struct scaler *scaler = &p->scaler[SCALER_SCALE];
     struct scaler_config scaler_conf = p->opts.scaler[SCALER_SCALE];
@@ -2302,7 +2322,7 @@ static void pass_scale_main(struct gl_video *p)
     // correct scaling at all for anamorphic clips.
     double f = MPMAX(xy[0], xy[1]);
     if (p->opts.correct_downscaling && f < 1.0)
-        scale_factor = 1.0 / f;
+        inv_scale = 1.0 / f;
 
     // Pre-conversion, like linear light/sigmoidization
     GLSLF("// scaler pre-conversion\n");
@@ -2347,7 +2367,7 @@ static void pass_scale_main(struct gl_video *p)
     finish_pass_tex(p, &p->indirect_tex, p->texture_w, p->texture_h);
     struct image src = image_wrap(p->indirect_tex, PLANE_RGB, p->components);
     gl_transform_trans(transform, &src.transform);
-    pass_sample(p, src, scaler, &scaler_conf, scale_factor, vp_w, vp_h);
+    pass_sample(p, src, scaler, &scaler_conf, inv_scale, vp_w, vp_h);
 
     // Changes the texture size to display size after main scaler.
     p->texture_w = vp_w;
@@ -2859,7 +2879,7 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
     // A is surface_bse, B is surface_now, C is surface_now+1 and D is
     // surface_end.
     struct scaler *tscale = &p->scaler[SCALER_TSCALE];
-    reinit_scaler(p, tscale, &p->opts.scaler[SCALER_TSCALE], 1, tscale_sizes);
+    reinit_scaler(p, tscale, &p->opts.scaler[SCALER_TSCALE], 1, 8);
     bool oversample = strcmp(tscale->conf.kernel.name, "oversample") == 0;
     bool linear = strcmp(tscale->conf.kernel.name, "linear") == 0;
     int size;
@@ -2867,8 +2887,8 @@ static void gl_video_interpolate_frame(struct gl_video *p, struct vo_frame *t,
     if (oversample || linear) {
         size = 2;
     } else {
-        assert(tscale->kernel && !tscale->kernel->polar);
-        size = ceil(tscale->kernel->size);
+        assert(tscale->filter && !tscale->filter->params.config.polar);
+        size = ceil(tscale->filter->row_size);
     }
 
     int radius = size/2;
@@ -3428,9 +3448,9 @@ static void check_gl_features(struct gl_video *p)
     // Without FP textures, we must always disable them.
     // I don't know if luminance alpha float textures exist, so disregard them.
     for (int n = 0; n < SCALER_COUNT; n++) {
-        const struct filter_kernel *kernel =
-            mp_find_filter_kernel(p->opts.scaler[n].kernel.name);
-        if (kernel) {
+        const struct pl_named_filter_config *filter =
+            pl_find_named_filter(p->opts.scaler[n].kernel.name);
+        if (filter) {
             char *reason = NULL;
             if (!have_float_tex)
                 reason = "(float tex. missing)";
@@ -3440,7 +3460,7 @@ static void check_gl_features(struct gl_video *p)
                 MP_WARN(p, "Disabling scaler #%d %s %s.\n", n,
                         p->opts.scaler[n].kernel.name, reason);
                 // p->opts is a copy => we can just mess with it.
-                p->opts.scaler[n].kernel.name = "bilinear";
+                p->opts.scaler[n] = gl_video_opts_def.scaler[n];
                 if (n == SCALER_TSCALE)
                     p->opts.interpolation = 0;
             }
@@ -3515,6 +3535,7 @@ void gl_video_uninit(struct gl_video *p)
     // Should all have been unreffed already.
     assert(!p->num_dr_buffers);
 
+    pl_context_destroy(&p->plctx);
     talloc_free(p);
 }
 
@@ -3586,6 +3607,7 @@ struct gl_video *gl_video_init(struct ra *ra, struct mp_log *log,
         .sc = gl_sc_create(ra, g, log),
         .video_eq = mp_csp_equalizer_create(p, g),
         .opts_cache = m_config_cache_alloc(p, g, &gl_video_conf),
+        .plctx = pl_context_create(PL_API_VER),
     };
     // make sure this variable is initialized to *something*
     p->pass = p->pass_fresh;
@@ -3612,16 +3634,13 @@ struct gl_video *gl_video_init(struct ra *ra, struct mp_log *log,
 static const char *handle_scaler_opt(const char *name, bool tscale)
 {
     if (name && name[0]) {
-        const struct filter_kernel *kernel = mp_find_filter_kernel(name);
-        if (kernel && (!tscale || !kernel->polar))
-                return kernel->f.name;
+        const struct pl_named_filter_config *conf = pl_find_named_filter(name);
+        if (conf && (!tscale || !conf->filter->polar))
+            return conf->name;
 
-        for (const char *const *filter = tscale ? fixed_tscale_filters
-                                                : fixed_scale_filters;
-             *filter; filter++) {
-            if (strcmp(*filter, name) == 0)
-                return *filter;
-        }
+        const char *fixed = find_fixed_scaler(name, tscale);
+        if (fixed)
+            return fixed;
     }
     return NULL;
 }
@@ -3667,13 +3686,13 @@ void gl_video_configure_queue(struct gl_video *p, struct vo *vo)
     // Figure out an adequate size for the interpolation queue. The larger
     // the radius, the earlier we need to queue frames.
     if (p->opts.interpolation) {
-        const struct filter_kernel *kernel =
-            mp_find_filter_kernel(p->opts.scaler[SCALER_TSCALE].kernel.name);
-        if (kernel) {
+        const struct pl_named_filter_config *conf =
+            pl_find_named_filter(p->opts.scaler[SCALER_TSCALE].kernel.name);
+        if (conf) {
             // filter_scale wouldn't be correctly initialized were we to use it here.
             // This is fine since we're always upsampling, but beware if downsampling
             // is added!
-            double radius = kernel->f.radius;
+            double radius = conf->filter->kernel->radius;
             radius = radius > 0 ? radius : p->opts.scaler[SCALER_TSCALE].radius;
             queue_size += 1 + ceil(radius);
         } else {
@@ -3705,9 +3724,9 @@ static int validate_scaler_opt(struct mp_log *log, const m_option_t *opt,
              *filter; filter++) {
             mp_info(log, "    %s\n", *filter);
         }
-        for (int n = 0; mp_filter_kernels[n].f.name; n++) {
-            if (!tscale || !mp_filter_kernels[n].polar)
-                mp_info(log, "    %s\n", mp_filter_kernels[n].f.name);
+        for (int n = 0; pl_named_filters[n].filter; n++) {
+            if (!tscale || !pl_named_filters[n].filter->polar)
+                mp_info(log, "    %s\n", pl_named_filters[n].name);
         }
         if (s[0])
             mp_fatal(log, "No scaler named '%s' found!\n", s);
@@ -3724,14 +3743,14 @@ static int validate_window_opt(struct mp_log *log, const m_option_t *opt,
         r = M_OPT_EXIT;
     } else {
         snprintf(s, sizeof(s), "%.*s", BSTR_P(param));
-        const struct filter_window *window = mp_find_filter_window(s);
-        if (!window)
+        const struct pl_named_filter_function *fun = pl_find_named_filter_function(s);
+        if (!fun)
             r = M_OPT_INVALID;
     }
     if (r < 1) {
         mp_info(log, "Available windows:\n");
-        for (int n = 0; mp_filter_windows[n].name; n++)
-            mp_info(log, "    %s\n", mp_filter_windows[n].name);
+        for (int n = 0; pl_named_filter_functions[n].function; n++)
+            mp_info(log, "    %s\n", pl_named_filter_functions[n].name);
         if (s[0])
             mp_fatal(log, "No window named '%s' found!\n", s);
     }

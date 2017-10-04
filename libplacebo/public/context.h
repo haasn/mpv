@@ -26,8 +26,8 @@ enum pl_log_level {
     PL_LOG_NONE = 0,
     PL_LOG_FATAL,   // results in total loss of function
     PL_LOG_ERR,     // serious error, may result in impaired function
-    PL_LOG_WARN,    // warning. potentially harmful
-    PL_LOG_INFO,    // informational message
+    PL_LOG_WARN,    // warning. potentially harmful; probably user-relevant
+    PL_LOG_INFO,    // informational message, also potentially harmless errors
     PL_LOG_DEBUG,   // verbose debug message, informational
     PL_LOG_TRACE,   // very verbose trace of activity
     PL_LOG_ALL = PL_LOG_TRACE,
@@ -41,8 +41,13 @@ struct pl_context;
 // (this is used to detect ABI mismatch due to broken linking)
 struct pl_context *pl_context_create(int api_ver);
 
-// This implicitly destroys all objects allocated from this pl_context in
-// additiona to the pl_context itself. The pointer is set to NULL afterwards.
+// Except where otherwise noted, all objects allocated from this pl_context
+// must be destroyed before the pl_context is destroyed.
+//
+// Note: As a rule of thumb, all _destroy functions take the pointer to the
+// object to free as their parameter. This pointer is overwritten by NULL
+// afterwards. Calling a _destroy function on &{NULL} is valid, but calling it
+// on NULL itself is invalid.
 void pl_context_destroy(struct pl_context **ctx);
 
 // Associate a log callback with the context. All messages, informational

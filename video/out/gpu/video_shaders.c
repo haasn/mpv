@@ -41,9 +41,10 @@ static void pass_sample_separated_get_weights(struct gl_shader_cache *sc,
                                               struct scaler *scaler)
 {
     gl_sc_uniform_texture(sc, "lut", scaler->lut);
-    GLSLF("float ypos = LUT_POS(fcoord, %d.0);\n", scaler->lut_size);
+    GLSLF("float ypos = LUT_POS(fcoord, %d.0);\n",
+          scaler->filter->params.lut_entries);
 
-    int N = scaler->kernel->size;
+    int N = scaler->filter->row_size;
     int width = (N + 3) / 4; // round up
 
     GLSLF("float weights[%d];\n", N);
@@ -60,7 +61,7 @@ static void pass_sample_separated_get_weights(struct gl_shader_cache *sc,
 void pass_sample_separated_gen(struct gl_shader_cache *sc, struct scaler *scaler,
                                int d_x, int d_y)
 {
-    int N = scaler->kernel->size;
+    int N = scaler->filter->row_size;
     bool use_ar = scaler->conf.antiring > 0;
     bool planar = d_x == 0 && d_y == 0;
     GLSL(color = vec4(0.0);)
@@ -103,8 +104,8 @@ void pass_sample_separated_gen(struct gl_shader_cache *sc, struct scaler *scaler
 static void polar_sample(struct gl_shader_cache *sc, struct scaler *scaler,
                          int x, int y, int components, bool planar)
 {
-    double radius = scaler->kernel->f.radius * scaler->kernel->filter_scale;
-    double radius_cutoff = scaler->kernel->radius_cutoff;
+    double radius = scaler->filter->radius;
+    double radius_cutoff = scaler->filter->radius_cutoff;
 
     // Since we can't know the subpixel position in advance, assume a
     // worst case scenario
@@ -123,10 +124,10 @@ static void polar_sample(struct gl_shader_cache *sc, struct scaler *scaler,
     // get the weight for this pixel
     if (scaler->lut->params.dimensions == 1) {
         GLSLF("w = tex1D(lut, LUT_POS(d * 1.0/%f, %d.0)).r;\n",
-              radius, scaler->lut_size);
+              radius, scaler->filter->params.lut_entries);
     } else {
         GLSLF("w = texture(lut, vec2(0.5, LUT_POS(d * 1.0/%f, %d.0))).r;\n",
-              radius, scaler->lut_size);
+              radius, scaler->filter->params.lut_entries);
     }
     GLSL(wsum += w;)
 
@@ -157,7 +158,7 @@ void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler,
     gl_sc_uniform_texture(sc, "lut", scaler->lut);
 
     GLSLF("// scaler samples\n");
-    int bound = ceil(scaler->kernel->radius_cutoff);
+    int bound = ceil(scaler->filter->radius_cutoff);
     for (int y = 1-bound; y <= bound; y += 2) {
         for (int x = 1-bound; x <= bound; x += 2) {
             // First we figure out whether it's more efficient to use direct
@@ -165,7 +166,7 @@ void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler,
             // only to discard some of them is very wasteful, so only do it if
             // we suspect it will be a win rather than a loss. This is the case
             // exactly when all four texels are within bounds
-            bool use_gather = sqrt(x*x + y*y) < scaler->kernel->radius_cutoff;
+            bool use_gather = sqrt(x*x + y*y) < scaler->filter->radius_cutoff;
 
             // textureGather is only supported in GLSL 400+
             if (glsl_version < 400)
@@ -208,7 +209,7 @@ void pass_sample_polar(struct gl_shader_cache *sc, struct scaler *scaler,
 void pass_compute_polar(struct gl_shader_cache *sc, struct scaler *scaler,
                         int components, int bw, int bh, int iw, int ih)
 {
-    int bound = ceil(scaler->kernel->radius_cutoff);
+    int bound = ceil(scaler->filter->radius_cutoff);
     int offset = bound - 1; // padding top/left
 
     GLSL(color = vec4(0.0);)
@@ -267,7 +268,7 @@ static void bicubic_calcweights(struct gl_shader_cache *sc, const char *t, const
     GLSLF("%s.xy += vec2(1.0 + %s, 1.0 - %s);\n", t, s, s);
 }
 
-void pass_sample_bicubic_fast(struct gl_shader_cache *sc)
+void pass_sample_bicubic(struct gl_shader_cache *sc)
 {
     GLSLF("{\n");
     GLSL(vec2 fcoord = fract(pos * size + vec2(0.5, 0.5));)

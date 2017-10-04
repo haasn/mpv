@@ -23,26 +23,27 @@
 
 double pl_filter_sample(const struct pl_filter_config *c, double x)
 {
-    assert(c->kernel);
+    double radius = c->kernel->radius;
 
     // All filters are symmetric, and in particular only need to be defined
     // for [0, radius].
     x = fabs(x);
 
-    // Apply the taper coefficient
-    x = x <= c->taper ? 0.0 : (x - c->taper) / (1.0 - c->taper / c->radius);
+    // Apply the blur and taper coefficients as needed
+    x = c->blur > 0.0 ? x / c->blur : x;
+    x = x <= c->taper ? 0.0 : (x - c->taper) / (1.0 - c->taper / radius);
 
     // Return early for values outside of the kernel radius, since the functions
     // are not necessarily valid outside of this interval. No such check is
     // needed for the window, because it's always stretched to fit.
-    if (x > c->kernel->radius)
+    if (x > radius)
         return 0.0;
 
     double k = c->kernel->weight(c->kernel, x);
 
     // Apply the optional windowing function
     if (c->window)
-       k *= c->window->weight(c->window, x / c->radius * c->window->radius);
+       k *= c->window->weight(c->window, x / radius * c->window->radius);
 
     return k < 0 ? (1 - c->clamp) * k : k;
 }
@@ -56,14 +57,16 @@ static void compute_row(struct pl_filter *f, double offset, float *out)
     for (int i = 0; i < f->row_size; i++) {
         double x = offset - (i - f->row_size / 2 + 1);
         // Readjust the value range to account for a stretched kernel.
-        x *= f->params.config.radius / f->radius;
+        x *= f->params.config.kernel->radius / f->radius;
         double weight = pl_filter_sample(&f->params.config, x);
         out[i] = weight;
         sum += weight;
     }
     // Normalize to preserve energy
-    for (int i = 0; i < f->row_size; i++)
-        out[i] /= sum;
+    if (sum > 0.0) {
+        for (int i = 0; i < f->row_size; i++)
+            out[i] /= sum;
+    }
 }
 
 static struct pl_filter_function *dupfilter(void *tactx,
@@ -75,16 +78,20 @@ static struct pl_filter_function *dupfilter(void *tactx,
 const struct pl_filter *pl_filter_generate(struct pl_context *ctx,
                                        const struct pl_filter_params *params)
 {
-    assert(params->lut_entries > 0);
-    struct pl_filter *f = talloc_zero(NULL, struct pl_filter);
+    if (params->lut_entries <= 0 || !params->config.kernel) {
+        pl_fatal(ctx, "pl_filter_generate: Invalid params: missing lut_entries "
+                 "or config.kernel\n");
+        return NULL;
+    }
+
+    struct pl_filter *f = talloc_zero(ctx, struct pl_filter);
     f->params = *params;
     f->params.config.kernel = dupfilter(f, params->config.kernel);
     f->params.config.window = dupfilter(f, params->config.window);
 
     // Compute the required filter radius
-    f->radius = params->config.radius;
-    if (!f->radius)
-        f->radius = params->config.kernel->radius;
+    float radius = f->params.config.kernel->radius;
+    f->radius = radius;
     if (params->filter_scale > 1.0)
         f->radius *= params->filter_scale;
 
@@ -94,7 +101,7 @@ const struct pl_filter *pl_filter_generate(struct pl_context *ctx,
         weights = talloc_array(f, float, params->lut_entries);
         f->radius_cutoff = 0.0;
         for (int i = 0; i < params->lut_entries; i++) {
-            double x = params->config.radius * i / (params->lut_entries - 1);
+            double x = radius * i / (params->lut_entries - 1);
             weights[i] = pl_filter_sample(&f->params.config, x);
             if (fabs(weights[i]) > params->cutoff)
                 f->radius_cutoff = x;
@@ -103,23 +110,55 @@ const struct pl_filter *pl_filter_generate(struct pl_context *ctx,
         // Pick the most appropriate row size
         f->row_size = ceil(f->radius * 2.0);
         if (f->row_size > params->max_row_size) {
-            pl_warn(ctx, "Required filter size %d exceeds the maximum allowed "
+            pl_info(ctx, "Required filter size %d exceeds the maximum allowed "
                     "size of %d. This may result in adverse effects (aliasing, "
                     "or moiré artifacts).", f->row_size, params->max_row_size);
             f->row_size = params->max_row_size;
             f->insufficient = true;
         }
+        f->row_stride = PL_ALIGN(f->row_size, params->row_stride_align);
 
         // Compute a 2D array indexed by the subpixel position
-        weights = talloc_array(f, float, params->lut_entries * f->row_size);
+        weights = talloc_zero_array(f, float, params->lut_entries * f->row_stride);
         for (int i = 0; i < params->lut_entries; i++) {
             compute_row(f, i / (double)(params->lut_entries - 1),
-                        weights + f->row_size * i);
+                        weights + f->row_stride * i);
         }
     }
 
     f->weights = weights;
     return f;
+}
+
+void pl_filter_free(const struct pl_filter **filter)
+{
+    TA_FREEP((void **) filter);
+}
+
+const struct pl_named_filter_function *pl_find_named_filter_function(const char *name)
+{
+    if (!name)
+        return NULL;
+
+    for (int i = 0; pl_named_filter_functions[i].function; i++) {
+        if (strcmp(pl_named_filter_functions[i].name, name) == 0)
+            return &pl_named_filter_functions[i];
+    }
+
+    return NULL;
+}
+
+const struct pl_named_filter_config *pl_find_named_filter(const char *name)
+{
+    if (!name)
+        return NULL;
+
+    for (int i = 0; pl_named_filters[i].filter; i++) {
+        if (strcmp(pl_named_filters[i].name, name) == 0)
+            return &pl_named_filters[i];
+    }
+
+    return NULL;
 }
 
 // Built-in filter functions
@@ -132,7 +171,7 @@ static double box(const struct pl_filter_function *f, double x)
 const struct pl_filter_function pl_filter_function_box = {
     .resizable = true,
     .weight    = box,
-    .radius    = 1.0,
+    .radius    = 0.5,
 };
 
 static double triangle(const struct pl_filter_function *f, double x)
@@ -391,7 +430,7 @@ const struct pl_filter_function pl_filter_function_spline64 = {
 };
 
 // Named filter functions
-const struct pl_named_filter_function pl_named_filter_function[] = {
+const struct pl_named_filter_function pl_named_filter_functions[] = {
     {"box",             &pl_filter_function_box},
     {"dirichlet",       &pl_filter_function_box}, // alias
     {"triangle",        &pl_filter_function_triangle},
@@ -431,12 +470,11 @@ const struct pl_filter_config pl_filter_spline64 = {
     .kernel = &pl_filter_function_spline64,
 };
 
-const struct pl_filter_config pl_filter_nearest = {
+const struct pl_filter_config pl_filter_box = {
     .kernel = &pl_filter_function_box,
-    .radius = 0.5,
 };
 
-const struct pl_filter_config pl_filter_bilinear = {
+const struct pl_filter_config pl_filter_triangle = {
     .kernel = &pl_filter_function_triangle,
 };
 
@@ -444,22 +482,25 @@ const struct pl_filter_config pl_filter_gaussian = {
     .kernel = &pl_filter_function_gaussian,
 };
 
-// Sinc family
+// Sinc configured to three taps
+static const struct pl_filter_function sinc3 = {
+    .resizable = true,
+    .weight    = sinc,
+    .radius    = 3.0,
+};
+
 const struct pl_filter_config pl_filter_sinc = {
-    .kernel = &pl_filter_function_sinc,
-    .radius = 3.0,
+    .kernel = &sinc3,
 };
 
 const struct pl_filter_config pl_filter_lanczos = {
-    .kernel = &pl_filter_function_sinc,
+    .kernel = &sinc3,
     .window = &pl_filter_function_sinc,
-    .radius = 3.0,
 };
 
 const struct pl_filter_config pl_filter_ginseng = {
-    .kernel = &pl_filter_function_sinc,
+    .kernel = &sinc3,
     .window = &pl_filter_function_jinc,
-    .radius = 3.0,
 };
 
 // Jinc configured to three taps
@@ -495,10 +536,10 @@ const struct pl_filter_config pl_filter_ewa_hann = {
 const struct pl_filter_config pl_filter_haasnsoft = {
     .kernel = &jinc3,
     .window = &pl_filter_function_hann,
-    // The radius is tuned to equal out orthogonal and diagonal contributions
+    // The blur is tuned to equal out orthogonal and diagonal contributions
     // on a regular grid. This has the effect of almost completely killing
     // aliasing.
-    .radius = 3.5945301874245223,
+    .blur = 1.11,
     .polar = true,
 };
 
@@ -538,10 +579,10 @@ const struct pl_named_filter_config pl_named_filters[] = {
     {"spline16",            &pl_filter_spline16},
     {"spline36",            &pl_filter_spline36},
     {"spline64",            &pl_filter_spline64},
-    {"nearest",             &pl_filter_nearest},
-    {"box",                 &pl_filter_nearest}, // alias
-    {"bilinear",            &pl_filter_bilinear},
-    {"triangle",            &pl_filter_bilinear}, // alias
+    {"box",                 &pl_filter_box},
+    {"nearest",             &pl_filter_box}, // alias
+    {"triangle",            &pl_filter_triangle},
+    {"bilinear",            &pl_filter_triangle}, // alias
     {"gaussian",            &pl_filter_gaussian},
     {"sinc",                &pl_filter_sinc},
     {"lanczos",             &pl_filter_lanczos},

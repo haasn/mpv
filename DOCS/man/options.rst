@@ -3928,17 +3928,13 @@ The following video options are currently all specific to ``--vo=gpu`` and
         Elliptic weighted average Lanczos scaling. Also known as Jinc.
         Relatively slow, but very good quality. The radius can be controlled
         with ``scale-radius``. Increasing the radius makes the filter sharper
-        but adds more ringing.
+        but adds more ringing. If youre hardware can run it, this is probably
+        what you should use by default.
 
         (This filter is an alias for ``jinc``-windowed ``jinc``)
 
-    ``ewa_lanczossharp``
-        A slightly sharpened version of ewa_lanczos, preconfigured to use an
-        ideal radius and parameter. If your hardware can run it, this is
-        probably what you should use by default.
-
     ``mitchell``
-        Mitchell-Netravali. The ``B`` and ``C`` parameters can be set with
+        Mitchell-Netravali. The ``B`` and ``C`` parameters can be adjusted with
         ``--scale-param1`` and ``--scale-param2``. This filter is very good at
         downscaling (see ``--dscale``).
 
@@ -4037,7 +4033,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     0.0 and 1.0. The default value of 0.0 disables antiringing entirely.
 
     Note that this doesn't affect the special filters ``bilinear`` and
-    ``bicubic_fast``, nor does it affect any polar (EWA) scalers.
+    ``bicubic``, nor does it affect any polar (EWA) scalers.
 
 ``--scale-window=<window>``, ``--cscale-window=<window>``, ``--dscale-window=<window>``, ``--tscale-window=<window>``
     (Advanced users only) Choose a custom windowing function for the kernel.
@@ -4495,7 +4491,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     If set to a value other than 0, enable an unsharp masking filter. Positive
     values will sharpen the image (but add more ringing and aliasing). Negative
     values will blur the image. If your GPU is powerful enough, consider
-    alternatives like the ``ewa_lanczossharp`` scale filter, or the
+    alternatives like the ``ewa_lanczos`` scale filter, or the
     ``--scale-blur`` option.
 
 ``--opengl-glfinish``
