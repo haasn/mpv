@@ -1,5 +1,3 @@
-#include "ta/ta_talloc.h"
-
 #include "context.h"
 
 struct pl_context *pl_context_create(int api_ver)

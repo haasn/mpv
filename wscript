@@ -47,6 +47,11 @@ build_options = [
         'default': 'enable',
         'func': check_true
     }, {
+        'name': '--libplacebo',
+        'desc': 'libplacebo',
+        'default': 'disable',
+        'func': check_true
+    }, {
         'name': '--libmpv-shared',
         'desc': 'shared library',
         'default': 'disable',

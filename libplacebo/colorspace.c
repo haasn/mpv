@@ -15,11 +15,9 @@
  * License along with libplacebo. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <stdlib.h>
-#include <stdint.h>
-#include <assert.h>
 #include <math.h>
 
+#include "common.h"
 #include "public/colorspace.h"
 
 bool pl_color_space_is_ycbcr_like(enum pl_color_space space)

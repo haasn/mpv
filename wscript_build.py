@@ -150,7 +150,19 @@ def build(ctx):
         ( "osdep/subprocess-dummy.c" ),
     ])
 
-    sources = [
+    libplacebo_sources = [
+        ( "libplacebo/colorspace.c" ),
+        ( "libplacebo/context.c" ),
+        ( "libplacebo/filters.c" ),
+
+        ## Misc helpers without external dependencies (shared with mpv)
+        ( "bstr/bstr.c" ),
+        ( "ta/ta.c" ),
+        ( "ta/ta_talloc.c" ),
+        ( "ta/ta_utils.c" ),
+    ]
+
+    mpv_sources = libplacebo_sources + [
         ## Audio
         ( "audio/aconverter.c" ),
         ( "audio/audio.c",                       "libaf" ),
@@ -248,7 +260,6 @@ def build(ctx):
         ( "input/pipe-win32.c",                  "win32-pipes" ),
 
         ## Misc
-        ( "bstr/bstr.c" ),
         ( "misc/bstr_utf8.c" ),
         ( "misc/charset_conv.c" ),
         ( "misc/dispatch.c" ),
@@ -332,11 +343,6 @@ def build(ctx):
         ( "sub/sd_ass.c",                        "libass" ),
         ( "sub/sd_lavc.c" ),
         ( "sub/filter_sdh.c" ),
-
-        ## libplacebo components (XXX: preliminary)
-        ( "libplacebo/colorspace.c" ),
-        ( "libplacebo/context.c" ),
-        ( "libplacebo/filters.c" ),
 
         ## Video
         ( "video/csputils.c" ),
@@ -495,9 +501,6 @@ def build(ctx):
         ( "osdep/win32/pthread.c",               "win32-internal-pthreads"),
         ( "osdep/android/posix-spawn.c",         "android"),
         ( "osdep/android/strnlen.c",             "android"),
-
-        ## tree_allocator
-        "ta/ta.c", "ta/ta_talloc.c", "ta/ta_utils.c"
     ]
 
     if ctx.dependency_satisfied('win32-executable'):
@@ -529,7 +532,7 @@ def build(ctx):
     if ctx.dependency_satisfied('cplayer') or ctx.dependency_satisfied('test'):
         ctx(
             target       = "objects",
-            source       = ctx.filtered_sources(sources),
+            source       = ctx.filtered_sources(mpv_sources),
             use          = ctx.dependencies_use(),
             includes     = _all_includes(ctx),
             features     = "c",
@@ -599,7 +602,7 @@ def build(ctx):
 
             libmpv_kwargs = {
                 "target": "mpv",
-                "source":   ctx.filtered_sources(sources),
+                "source":   ctx.filtered_sources(mpv_sources),
                 "use":      ctx.dependencies_use(),
                 "includes": [ctx.bldnode.abspath(), ctx.srcnode.abspath()] + \
                              ctx.dependencies_includes(),
@@ -652,6 +655,37 @@ def build(ctx):
             ctx.install_as(ctx.env.INCDIR + '/mpv/' + f, 'libmpv/' + f)
 
         ctx.install_as(ctx.env.LIBDIR + '/pkgconfig/mpv.pc', 'libmpv/mpv.pc')
+
+    if ctx.dependency_satisfied('libplacebo'):
+        waftoolsdir = os.path.join(os.path.dirname(__file__), "waftools")
+        ctx.load("syms", tooldir=waftoolsdir)
+
+        vre = '#define PL_API_VER (\d+)'
+        header = ctx.path.find_node("libplacebo/public/context.h").read()
+        apiver = re.search(vre, header).groups()[0]
+
+        ctx(
+            target      = 'placebo',
+            source      = ctx.filtered_sources(libplacebo_sources),
+            use         = ctx.dependencies_use(),
+            includes    = [ctx.bldnode.abspath(), ctx.srcnode.abspath()] + \
+                          ctx.dependencies_includes(),
+            features    = 'c cshlib syms',
+            export_symbols_def = 'libplacebo/syms.def',
+            install_path = ctx.env.LIBDIR,
+            install_path_implib = ctx.env.LIBDIR,
+            vnum        = apiver,
+
+            PREFIX      = ctx.env.PREFIX,
+            LIBDIR      = ctx.env.LIBDIR,
+            INCDIR      = ctx.env.INCDIR,
+            VERSION     = apiver,
+        )
+
+        headers = ['context.h', 'colorspace.h', 'filters.h']
+        for f in headers:
+            ctx.install_as(ctx.env.INCDIR + '/libplacebo/' + f,
+                           'libplacebo/public/' + f)
 
     if ctx.dependency_satisfied('html-build'):
         _build_html(ctx)

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <stdarg.h>
-#include <stdbool.h>
+#include "bstr/bstr.h"
 
-#include "misc/bstr.h"
+#include "common.h"
 #include "public/context.h"
 
 struct pl_context {

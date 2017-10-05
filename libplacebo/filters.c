@@ -15,11 +15,10 @@
  */
 
 #include <math.h>
-#include <assert.h>
-#include "ta/ta_talloc.h"
 
-#include "public/filters.h"
+#include "common.h"
 #include "context.h"
+#include "public/filters.h"
 
 double pl_filter_sample(const struct pl_filter_config *c, double x)
 {
