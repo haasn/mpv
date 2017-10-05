@@ -1,5 +1,4 @@
-#ifndef MP_CTYPE_H_
-#define MP_CTYPE_H_
+#pragma once
 
 // Roughly follows C semantics, but doesn't account for EOF, allows char as
 // parameter, and is locale independent (always uses "C" locale).
@@ -15,5 +14,3 @@ static inline int mp_isalnum(char c) { return mp_isalpha(c) || mp_isdigit(c); }
 
 static inline char mp_tolower(char c) { return mp_isupper(c) ? c - 'A' + 'a' : c; }
 static inline char mp_toupper(char c) { return mp_islower(c) ? c - 'a' + 'A' : c; }
-
-#endif

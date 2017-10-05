@@ -19,7 +19,8 @@
 #define MPLAYER_INPUT_H
 
 #include <stdbool.h>
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
+#include "misc/bstr_utf8.h"
 
 #include "cmd_list.h"
 #include "cmd_parse.h"

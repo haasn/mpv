@@ -40,7 +40,7 @@
 #include "config.h"
 #include "common/msg.h"
 #include "options/options.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "common/av_common.h"
 #include "common/codecs.h"
 

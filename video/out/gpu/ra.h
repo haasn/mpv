@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common/common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 // Handle for a rendering API backend.
 struct ra {

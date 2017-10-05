@@ -46,7 +46,7 @@
 #include <libavutil/avstring.h>
 
 #include "osdep/io.h"
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 
 #include "stream.h"
 #include "common/tags.h"

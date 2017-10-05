@@ -43,7 +43,7 @@
 #include "common/msg.h"
 #include "common/tags.h"
 #include "common/av_common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "misc/charset_conv.h"
 
 #include "stream/stream.h"

@@ -248,7 +248,8 @@ def build(ctx):
         ( "input/pipe-win32.c",                  "win32-pipes" ),
 
         ## Misc
-        ( "misc/bstr.c" ),
+        ( "bstr/bstr.c" ),
+        ( "misc/bstr_utf8.c" ),
         ( "misc/charset_conv.c" ),
         ( "misc/dispatch.c" ),
         ( "misc/json.c" ),

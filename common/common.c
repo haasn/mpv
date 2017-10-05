@@ -22,8 +22,9 @@
 #include <libavutil/error.h>
 
 #include "mpv_talloc.h"
-#include "misc/bstr.h"
-#include "misc/ctype.h"
+#include "bstr/bstr.h"
+#include "misc/bstr_utf8.h"
+#include "bstr/ctype.h"
 #include "common/common.h"
 #include "osdep/strnlen.h"
 
@@ -144,18 +145,6 @@ int mp_snprintf_cat(char *str, size_t size, const char *format, ...)
     return r;
 }
 
-// Encode the unicode codepoint as UTF-8, and append to the end of the
-// talloc'ed buffer. All guarantees bstr_xappend() give applies, such as
-// implicit \0-termination for convenience.
-void mp_append_utf8_bstr(void *talloc_ctx, struct bstr *buf, uint32_t codepoint)
-{
-    char data[8];
-    uint8_t tmp;
-    char *output = data;
-    PUT_UTF8(codepoint, tmp, *output++ = tmp;);
-    bstr_xappend(talloc_ctx, buf, (bstr){data, output - data});
-}
-
 // Parse a C/JSON-style escape beginning at code, and append the result to *str
 // using talloc. The input string (*code) must point to the first character
 // after the initial '\', and after parsing *code is set to the first character
@@ -208,7 +197,7 @@ static bool mp_parse_escape(void *talloc_ctx, bstr *dst, bstr *code)
                 return false;
             c = ((c - 0xd800) << 10) + 0x10000 + (c2 - 0xdc00);
         }
-        mp_append_utf8_bstr(talloc_ctx, dst, c);
+        bstr_append_utf8(talloc_ctx, dst, c);
         *code = bstr_cut(*code, 5);
         return true;
     }

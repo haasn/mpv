@@ -50,7 +50,6 @@
 #include "options/path.h"
 #include "mpv_talloc.h"
 #include "options/options.h"
-#include "misc/bstr.h"
 #include "stream/stream.h"
 #include "common/common.h"
 

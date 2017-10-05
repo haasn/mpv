@@ -25,7 +25,7 @@
 #include <libswscale/swscale.h>
 
 #include "config.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "osdep/io.h"
 #include "options/m_config.h"
 #include "options/path.h"

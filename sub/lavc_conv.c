@@ -28,7 +28,7 @@
 #include "mpv_talloc.h"
 #include "common/msg.h"
 #include "common/av_common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "sd.h"
 
 #define HAVE_AV_WEBVTT (LIBAVCODEC_VERSION_MICRO >= 100)

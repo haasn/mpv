@@ -21,7 +21,7 @@
 #include <inttypes.h>
 
 #include "osdep/endian.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "video/csputils.h"
 
 #if BYTE_ORDER == BIG_ENDIAN

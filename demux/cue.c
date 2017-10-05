@@ -22,7 +22,7 @@
 
 #include "mpv_talloc.h"
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "common/common.h"
 #include "common/tags.h"
 

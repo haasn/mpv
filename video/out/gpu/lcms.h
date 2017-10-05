@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "video/csputils.h"
 #include <libavutil/buffer.h>
 

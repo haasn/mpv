@@ -39,7 +39,7 @@
 #include <X11/extensions/Xrandr.h>
 
 #include "config.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "options/options.h"
 #include "options/m_config.h"
 #include "common/common.h"

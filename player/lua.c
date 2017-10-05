@@ -39,7 +39,7 @@
 #include "options/m_option.h"
 #include "input/input.h"
 #include "options/path.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "misc/json.h"
 #include "osdep/subprocess.h"
 #include "osdep/timer.h"

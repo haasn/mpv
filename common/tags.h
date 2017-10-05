@@ -1,7 +1,7 @@
 #ifndef MP_TAGS_H
 #define MP_TAGS_H
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 struct mp_tags {
     char **keys;

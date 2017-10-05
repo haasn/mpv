@@ -27,7 +27,7 @@
 #include "screenshot.h"
 #include "core.h"
 #include "command.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "misc/dispatch.h"
 #include "misc/thread_pool.h"
 #include "common/msg.h"

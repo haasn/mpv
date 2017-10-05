@@ -15,7 +15,7 @@
  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "stream/stream.h"
 #include "demux.h"
 

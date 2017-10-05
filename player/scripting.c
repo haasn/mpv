@@ -31,7 +31,7 @@
 #include "common/common.h"
 #include "common/msg.h"
 #include "options/path.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "core.h"
 #include "client.h"
 #include "libmpv/client.h"

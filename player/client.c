@@ -29,7 +29,7 @@
 #include "common/global.h"
 #include "input/input.h"
 #include "input/cmd_list.h"
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 #include "misc/dispatch.h"
 #include "misc/rendezvous.h"
 #include "options/m_config.h"

@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 #include "common/common.h"
 #include "common/msg.h"
 #include "options/options.h"

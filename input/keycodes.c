@@ -19,7 +19,8 @@
 #include <string.h>
 #include <strings.h>
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
+#include "misc/bstr_utf8.h"
 #include "common/common.h"
 #include "common/msg.h"
 
@@ -247,7 +248,7 @@ static void mp_input_append_key_name(bstr *buf, int key)
 
     // printable, and valid unicode range
     if (key >= 32 && key <= 0x10FFFF) {
-        mp_append_utf8_bstr(NULL, buf, key);
+        bstr_append_utf8(NULL, buf, key);
         return;
     }
 

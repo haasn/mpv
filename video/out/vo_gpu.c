@@ -30,7 +30,7 @@
 
 #include "mpv_talloc.h"
 #include "common/common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "common/msg.h"
 #include "common/global.h"
 #include "options/m_config.h"

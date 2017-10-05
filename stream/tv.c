@@ -37,7 +37,7 @@
 
 
 #include "common/msg.h"
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 
 #include "options/m_option.h"
 #include "options/m_config.h"

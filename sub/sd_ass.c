@@ -29,6 +29,7 @@
 #include "options/options.h"
 #include "common/common.h"
 #include "common/msg.h"
+#include "misc/bstr_utf8.h"
 #include "demux/demux.h"
 #include "video/csputils.h"
 #include "video/mp_image.h"
@@ -628,7 +629,7 @@ static void fill_plaintext(struct sd *sd, double pts)
         bstr_xappend(NULL, &dst, (bstr){text, 1});
         // Break ASS escapes with U+2060 WORD JOINER
         if (*text == '\\')
-            mp_append_utf8_bstr(NULL, &dst, 0x2060);
+            bstr_append_utf8(NULL, &dst, 0x2060);
         text++;
     }
 

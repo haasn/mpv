@@ -33,6 +33,7 @@
 #include "common/common.h"
 #include "options/m_property.h"
 #include "common/encode.h"
+#include "misc/bstr_utf8.h"
 
 #include "osdep/terminal.h"
 #include "osdep/timer.h"

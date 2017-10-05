@@ -21,7 +21,7 @@
 #define MPLAYER_PATH_H
 
 #include <stdbool.h>
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 struct mpv_global;
 

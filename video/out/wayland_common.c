@@ -31,7 +31,7 @@
 #include <linux/input.h>
 
 #include "config.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "options/options.h"
 #include "common/msg.h"
 #include "mpv_talloc.h"

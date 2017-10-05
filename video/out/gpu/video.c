@@ -28,7 +28,7 @@
 #include "libplacebo/context.h"
 #include "video.h"
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "options/m_config.h"
 #include "common/global.h"
 #include "options/options.h"

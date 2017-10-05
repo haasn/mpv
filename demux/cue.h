@@ -20,7 +20,7 @@
 
 #include <stdbool.h>
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 struct cue_file {
     struct cue_track *tracks;

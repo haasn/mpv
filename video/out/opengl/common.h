@@ -24,7 +24,7 @@
 
 #include "config.h"
 #include "common/msg.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 #include "video/csputils.h"
 #include "video/mp_image.h"

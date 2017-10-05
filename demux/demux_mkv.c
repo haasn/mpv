@@ -47,7 +47,7 @@
 #include "common/av_common.h"
 #include "options/m_config.h"
 #include "options/m_option.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "stream/stream.h"
 #include "video/csputils.h"
 #include "video/mp_image.h"

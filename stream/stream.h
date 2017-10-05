@@ -26,7 +26,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 #define STREAM_BUFFER_SIZE 2048
 #define STREAM_MAX_SECTOR_SIZE (8 * 1024)

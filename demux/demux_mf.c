@@ -35,7 +35,7 @@
 #include "options/options.h"
 #include "options/m_config.h"
 #include "options/path.h"
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 
 #include "stream/stream.h"
 #include "demux.h"

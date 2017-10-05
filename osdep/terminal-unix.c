@@ -44,10 +44,11 @@
 #include "osdep/threads.h"
 
 #include "common/common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
+#include "misc/bstr_utf8.h"
 #include "input/input.h"
 #include "input/keycodes.h"
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 #include "terminal.h"
 
 #if HAVE_TERMIOS

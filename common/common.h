@@ -90,8 +90,6 @@ int mp_snprintf_cat(char *str, size_t size, const char *format, ...)
 
 struct bstr;
 
-void mp_append_utf8_bstr(void *talloc_ctx, struct bstr *buf, uint32_t codepoint);
-
 bool mp_append_escaped_string_noalloc(void *talloc_ctx, struct bstr *dst,
                                       struct bstr *src);
 bool mp_append_escaped_string(void *talloc_ctx, struct bstr *dst,

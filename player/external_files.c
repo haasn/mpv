@@ -26,7 +26,7 @@
 #include "common/common.h"
 #include "common/global.h"
 #include "common/msg.h"
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 #include "misc/charset_conv.h"
 #include "options/options.h"
 #include "options/path.h"

@@ -32,7 +32,7 @@
 #include "common/global.h"
 #include "common/encode.h"
 #include "common/msg.h"
-#include "misc/ctype.h"
+#include "bstr/ctype.h"
 #include "options/path.h"
 #include "options/m_config.h"
 #include "options/parse_configfile.h"

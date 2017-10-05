@@ -26,7 +26,7 @@
 #include "mpv_talloc.h"
 #include "common/common.h"
 #include "stream/stream.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 static void write_arg(bstr *cmdline, char *arg)
 {

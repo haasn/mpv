@@ -35,7 +35,7 @@
 
 #include "common/common.h"
 #include "common/global.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "common/msg.h"
 #include "options/options.h"
 #include "options/path.h"

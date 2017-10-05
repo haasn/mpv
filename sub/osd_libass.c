@@ -25,7 +25,8 @@
 #include "config.h"
 
 #include "mpv_talloc.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
+#include "misc/bstr_utf8.h"
 #include "common/common.h"
 #include "common/msg.h"
 #include "osd.h"
@@ -195,7 +196,7 @@ static void mangle_ass(bstr *dst, const char *in)
         // As used by osd_get_function_sym().
         if (in[0] == '\xFF' && in[1]) {
             bstr_xappend(NULL, dst, bstr0(ASS_USE_OSD_FONT));
-            mp_append_utf8_bstr(NULL, dst, OSD_CODEPOINTS + in[1]);
+            bstr_append_utf8(NULL, dst, OSD_CODEPOINTS + in[1]);
             bstr_xappend(NULL, dst, bstr0("{\\r}"));
             in += 2;
             continue;
@@ -210,7 +211,7 @@ static void mangle_ass(bstr *dst, const char *in)
         bstr_xappend(NULL, dst, (bstr){(char *)in, 1});
         // Break ASS escapes with U+2060 WORD JOINER
         if (escape_ass && *in == '\\')
-            mp_append_utf8_bstr(NULL, dst, 0x2060);
+            bstr_append_utf8(NULL, dst, 0x2060);
         in++;
     }
 }
@@ -393,10 +394,10 @@ static void update_progbar(struct osd_state *osd, struct osd_object *obj)
     if (obj->progbar_state.type == 0 || obj->progbar_state.type >= 256) {
         // no sym
     } else if (obj->progbar_state.type >= 32) {
-        mp_append_utf8_bstr(NULL, &buf, obj->progbar_state.type);
+        bstr_append_utf8(NULL, &buf, obj->progbar_state.type);
     } else {
         bstr_xappend(NULL, &buf, bstr0(ASS_USE_OSD_FONT));
-        mp_append_utf8_bstr(NULL, &buf, OSD_CODEPOINTS + obj->progbar_state.type);
+        bstr_append_utf8(NULL, &buf, OSD_CODEPOINTS + obj->progbar_state.type);
         bstr_xappend(NULL, &buf, bstr0("{\\r}"));
     }
 

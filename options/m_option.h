@@ -22,7 +22,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "audio/chmap.h"
 
 // m_option allows to parse, print and copy data of various types.

@@ -26,12 +26,11 @@
 
 #include "mpv_talloc.h"
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "osdep/atomic.h"
 #include "common/common.h"
 #include "common/global.h"
 #include "misc/ring.h"
-#include "misc/bstr.h"
 #include "options/options.h"
 #include "options/path.h"
 #include "osdep/terminal.h"

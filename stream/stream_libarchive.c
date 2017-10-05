@@ -18,7 +18,8 @@
 #include <archive.h>
 #include <archive_entry.h>
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
+#include "misc/bstr_utf8.h"
 #include "common/common.h"
 #include "stream.h"
 

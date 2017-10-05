@@ -17,7 +17,7 @@
 #ifndef MP_INPUT_EVENT_H_
 #define MP_INPUT_EVENT_H_
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 struct input_ctx;
 

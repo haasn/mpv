@@ -23,7 +23,7 @@
 #include <stdbool.h>
 
 #include "stream/stream.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 struct mp_log;
 

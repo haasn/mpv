@@ -24,7 +24,7 @@
 
 #include "stream/stream.h"
 #include "common/common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "common/msg.h"
 #include "options/m_option.h"
 #include "options/path.h"

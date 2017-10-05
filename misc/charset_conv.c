@@ -27,6 +27,7 @@
 #include "config.h"
 
 #include "common/msg.h"
+#include "misc/bstr_utf8.h"
 
 #if HAVE_UCHARDET
 #include <uchardet.h>

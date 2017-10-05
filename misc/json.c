@@ -47,7 +47,7 @@
 #include <assert.h>
 
 #include "common/common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 #include "json.h"
 

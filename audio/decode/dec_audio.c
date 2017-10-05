@@ -28,7 +28,7 @@
 #include "common/codecs.h"
 #include "common/msg.h"
 #include "common/recorder.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "options/options.h"
 
 #include "stream/stream.h"

@@ -27,7 +27,7 @@
 
 #include "mpv_talloc.h"
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "common/msg.h"
 #include "demux/demux.h"
 #include "options/path.h"

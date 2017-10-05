@@ -18,7 +18,7 @@
 #ifndef MP_PARSE_COMMAND_H
 #define MP_PARSE_COMMAND_H
 
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 struct mp_log;
 struct mp_cmd;

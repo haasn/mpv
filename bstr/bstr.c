@@ -22,19 +22,18 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <libavutil/common.h>
-
 #include "mpv_talloc.h"
-
-#include "common/common.h"
-#include "misc/ctype.h"
 #include "bstr.h"
+#include "ctype.h"
+
+#define MIN(a, b) ((a) > (b) ? (b) : (a))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 int bstrcmp(struct bstr str1, struct bstr str2)
 {
     int ret = 0;
     if (str1.len && str2.len)
-        ret = memcmp(str1.start, str2.start, FFMIN(str1.len, str2.len));
+        ret = memcmp(str1.start, str2.start, MIN(str1.len, str2.len));
 
     if (!ret) {
         if (str1.len == str2.len)
@@ -51,7 +50,7 @@ int bstrcasecmp(struct bstr str1, struct bstr str2)
 {
     int ret = 0;
     if (str1.len && str2.len)
-        ret = strncasecmp(str1.start, str2.start, FFMIN(str1.len, str2.len));
+        ret = strncasecmp(str1.start, str2.start, MIN(str1.len, str2.len));
 
     if (!ret) {
         if (str1.len == str2.len)
@@ -157,9 +156,9 @@ struct bstr bstr_splice(struct bstr str, int start, int end)
         start += str.len;
     if (end < 0)
         end += str.len;
-    end = FFMIN(end, str.len);
-    start = FFMAX(start, 0);
-    end = FFMAX(end, start);
+    end = MIN(end, str.len);
+    start = MAX(start, 0);
+    end = MAX(end, start);
     str.start += start;
     str.len = end - start;
     return str;
@@ -169,7 +168,7 @@ long long bstrtoll(struct bstr str, struct bstr *rest, int base)
 {
     str = bstr_lstrip(str);
     char buf[51];
-    int len = FFMIN(str.len, 50);
+    int len = MIN(str.len, 50);
     memcpy(buf, str.start, len);
     buf[len] = 0;
     char *endptr;
@@ -183,7 +182,7 @@ double bstrtod(struct bstr str, struct bstr *rest)
 {
     str = bstr_lstrip(str);
     char buf[101];
-    int len = FFMIN(str.len, 100);
+    int len = MIN(str.len, 100);
     memcpy(buf, str.start, len);
     buf[len] = 0;
     char *endptr;
@@ -267,105 +266,6 @@ int bstr_sscanf(struct bstr str, const char *format, ...)
     talloc_free(ptr);
     return ret;
 }
-
-int bstr_parse_utf8_code_length(unsigned char b)
-{
-    if (b < 128)
-        return 1;
-    int bytes = 7 - av_log2(b ^ 255);
-    return (bytes >= 2 && bytes <= 4) ? bytes : -1;
-}
-
-int bstr_decode_utf8(struct bstr s, struct bstr *out_next)
-{
-    if (s.len == 0)
-        return -1;
-    unsigned int codepoint = s.start[0];
-    s.start++; s.len--;
-    if (codepoint >= 128) {
-        int bytes = bstr_parse_utf8_code_length(codepoint);
-        if (bytes < 1 || s.len < bytes - 1)
-            return -1;
-        codepoint &= 127 >> bytes;
-        for (int n = 1; n < bytes; n++) {
-            int tmp = (unsigned char)s.start[0];
-            if ((tmp & 0xC0) != 0x80)
-                return -1;
-            codepoint = (codepoint << 6) | (tmp & ~0xC0);
-            s.start++; s.len--;
-        }
-        if (codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
-            return -1;
-        // Overlong sequences - check taken from libavcodec.
-        // (The only reason we even bother with this is to make libavcodec's
-        //  retarded subtitle utf-8 check happy.)
-        unsigned int min = bytes == 2 ? 0x80 : 1 << (5 * bytes - 4);
-        if (codepoint < min)
-            return -1;
-    }
-    if (out_next)
-        *out_next = s;
-    return codepoint;
-}
-
-struct bstr bstr_split_utf8(struct bstr str, struct bstr *out_next)
-{
-    bstr rest;
-    int code = bstr_decode_utf8(str, &rest);
-    if (code < 0)
-        return (bstr){0};
-    if (out_next)
-        *out_next = rest;
-    return bstr_splice(str, 0, str.len - rest.len);
-}
-
-int bstr_validate_utf8(struct bstr s)
-{
-    while (s.len) {
-        if (bstr_decode_utf8(s, &s) < 0) {
-            // Try to guess whether the sequence was just cut-off.
-            unsigned int codepoint = (unsigned char)s.start[0];
-            int bytes = bstr_parse_utf8_code_length(codepoint);
-            if (bytes > 1 && s.len < 6) {
-                // Manually check validity of left bytes
-                for (int n = 1; n < bytes; n++) {
-                    if (n >= s.len) {
-                        // Everything valid until now - just cut off.
-                        return -(bytes - s.len);
-                    }
-                    int tmp = (unsigned char)s.start[n];
-                    if ((tmp & 0xC0) != 0x80)
-                        break;
-                }
-            }
-            return -8;
-        }
-    }
-    return 0;
-}
-
-struct bstr bstr_sanitize_utf8_latin1(void *talloc_ctx, struct bstr s)
-{
-    bstr new = {0};
-    bstr left = s;
-    unsigned char *first_ok = s.start;
-    while (left.len) {
-        int r = bstr_decode_utf8(left, &left);
-        if (r < 0) {
-            bstr_xappend(talloc_ctx, &new, (bstr){first_ok, left.start - first_ok});
-            mp_append_utf8_bstr(talloc_ctx, &new, (unsigned char)left.start[0]);
-            left.start += 1;
-            left.len -= 1;
-            first_ok = left.start;
-        }
-    }
-    if (!new.start)
-        return s;
-    if (first_ok != left.start)
-        bstr_xappend(talloc_ctx, &new, (bstr){first_ok, left.start - first_ok});
-    return new;
-}
-
 static void resize_append(void *talloc_ctx, bstr *s, size_t append_min)
 {
     size_t size = talloc_get_size(s->start);
@@ -414,7 +314,7 @@ void bstr_xappend_vasprintf(void *talloc_ctx, bstr *s, const char *fmt,
     char c;
     if (avail < 1)
         dest = &c;
-    size = vsnprintf(dest, MPMAX(avail, 1), fmt, copy);
+    size = vsnprintf(dest, MAX(avail, 1), fmt, copy);
     va_end(copy);
 
     if (size < 0)

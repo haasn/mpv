@@ -20,7 +20,7 @@
 #include <strings.h>
 #include <libavutil/dict.h>
 #include "tags.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 
 void mp_tags_set_str(struct mp_tags *tags, const char *key, const char *value)
 {

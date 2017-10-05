@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common/common.h"
-#include "misc/bstr.h"
+#include "bstr/bstr.h"
 #include "ra.h"
 
 // For mp_pass_perf
