@@ -1,9 +1,12 @@
 #include "context.h"
 
+#include <stdio.h>
+
 struct pl_context *pl_context_create(int api_ver)
 {
     if (api_ver != PL_API_VER) {
-        printf("*************************************************************\n"
+        fprintf(stderr,
+               "*************************************************************\n"
                "libplacebo: ABI mismatch detected!\n\n"
                "This is usually indicative of a linking mismatch, and will\n"
                "result in serious issues including stack corruption, random\n"
