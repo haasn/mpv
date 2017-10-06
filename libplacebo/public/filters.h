@@ -255,7 +255,7 @@ struct pl_filter_params {
 // precomputed LUT. The interpretation of the LUT depends on the type of the
 // filter (polar or separable).
 struct pl_filter {
-    // (Read-only) Deep copy of the parameters, for convenience.
+    // Deep copy of the parameters, for convenience.
     struct pl_filter_params params;
 
     // Contains the true radius of the computed filter. This may be

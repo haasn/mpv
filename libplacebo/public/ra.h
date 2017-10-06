@@ -390,7 +390,7 @@ struct ra_renderpass {
 
 struct ra_desc_update {
     int index;  // index into params.descriptors[]
-    void *data; // C object corresponding to ra_desc_type
+    void *data; // ra_* object with type corresponding to ra_desc_type
 };
 
 struct ra_var_update {
@@ -504,7 +504,7 @@ struct ra_fns {
     // significantly worse than clearing the entire image, and should be
     // avoided.
     void (*clear)(const struct ra *ra, const struct ra_tex *dst,
-                  const float color[4], const struct pl_rect3d *rect);
+                  struct pl_rect3d rect, const float color[4]);
 
     // Copy a sub-rectangle from one texture to another. The source/dest
     // regions must be within the texture bounds. Areas outside the dest region

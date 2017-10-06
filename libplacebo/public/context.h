@@ -29,12 +29,16 @@ enum pl_log_level {
     PL_LOG_WARN,    // warning. potentially harmful; probably user-relevant
     PL_LOG_INFO,    // informational message, also potentially harmless errors
     PL_LOG_DEBUG,   // verbose debug message, informational
-    PL_LOG_TRACE,   // very verbose trace of activity
+    PL_LOG_TRACE,   // very verbose, benign trace of activity
     PL_LOG_ALL = PL_LOG_TRACE,
 };
 
 // Meta-object to serve as a global entrypoint for the purposes of resource
-// allocation, logging, etc.
+// allocation, logging, etc.. Note on thread safety: the pl_context and
+// everything allocated from it are *not* thread-safe except where otherwise
+// noted. That is, multiple pl_context objects are safe to use from multiple
+// threads, but a single pl_context and all of its derived resources and
+// contexts must be used from a single thread at all times.
 struct pl_context;
 
 // Creates a new, blank pl_context. The argument must be given as PL_API_VER
@@ -50,8 +54,9 @@ struct pl_context *pl_context_create(int api_ver);
 // on NULL itself is invalid.
 void pl_context_destroy(struct pl_context **ctx);
 
-// Associate a log callback with the context. All messages, informational
-// or otherwise, will get redirected to this callback.
+// Associate a log callback with the context. All messages, informational or
+// otherwise, will get redirected to this callback. The logged messages do not
+// include a trailing newline.
 void pl_context_set_log_cb(struct pl_context *ctx, void *priv,
                            void (*fun)(void *priv, enum pl_log_level level,
                                        const char *msg));

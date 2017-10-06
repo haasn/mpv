@@ -33,7 +33,7 @@ void pl_msg_va(struct pl_context *ctx, enum pl_log_level lev, const char *fmt,
 #define pl_debug(log, ...)      pl_msg(ctx, PL_LOG_DEBUG, __VA_ARGS__)
 #define pl_trace(log, ...)      pl_msg(ctx, PL_LOG_TRACE, __VA_ARGS__)
 
-#define PL_MSG(obj, lev, ...)   pl_msg((obj)->log, lev, __VA_ARGS__)
+#define PL_MSG(obj, lev, ...)   pl_msg((obj)->ctx, lev, __VA_ARGS__)
 
 #define PL_FATAL(obj, ...)      PL_MSG(obj, PL_LOG_FATAL, __VA_ARGS__)
 #define PL_ERR(obj, ...)        PL_MSG(obj, PL_LOG_ERR, __VA_ARGS__)
@@ -41,10 +41,3 @@ void pl_msg_va(struct pl_context *ctx, enum pl_log_level lev, const char *fmt,
 #define PL_INFO(obj, ...)       PL_MSG(obj, PL_LOG_INFO, __VA_ARGS__)
 #define PL_DEBUG(obj, ...)      PL_MSG(obj, PL_LOG_DEBUG, __VA_ARGS__)
 #define PL_TRACE(obj, ...)      PL_MSG(obj, PL_LOG_TRACE, __VA_ARGS__)
-
-// Align up to the nearest multiple of an arbitrary alignment, which may also
-// be 0 to signal no alignment requirements.
-#define PL_ALIGN(x, align) ((align) ? ((x) + (align) - 1) / (align) * (align) : (x))
-
-// This is faster but must only be called on positive powers of two
-#define PL_ALIGN2(x, align) (((x) + (align) - 1) & ~((align) - 1))
