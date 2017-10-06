@@ -78,3 +78,13 @@ ra_buf_create
 ra_buf_destroy
 ra_find_texture_format
 ra_find_named_format
+pl_shader_alloc
+pl_shader_free
+pl_shader_is_compute
+pl_shader_merge
+pl_shader_linearize
+pl_shader_delinearize
+pl_shader_ootf
+pl_shader_inverse_ootf
+pl_shader_color_map
+pl_color_map_recommended_params
