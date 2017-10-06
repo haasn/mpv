@@ -59,7 +59,7 @@ size_t ta_calc_array_size(size_t element_size, size_t count);
 size_t ta_calc_prealloc_elems(size_t nextidx);
 void *ta_new_context(void *ta_parent);
 void *ta_steal_(void *ta_parent, void *ptr);
-void *ta_memdup(void *ta_parent, void *ptr, size_t size);
+void *ta_memdup(void *ta_parent, const void *ptr, size_t size);
 char *ta_strdup(void *ta_parent, const char *str);
 bool ta_strdup_append(char **str, const char *a);
 bool ta_strdup_append_buffer(char **str, const char *a);
@@ -136,7 +136,7 @@ bool ta_vasprintf_append_buffer(char **str, const char *fmt, va_list ap) TA_PRF(
 char *ta_xstrdup(void *ta_parent, const char *str);
 char *ta_xstrndup(void *ta_parent, const char *str, size_t n);
 void *ta_xsteal_(void *ta_parent, void *ptr);
-void *ta_xmemdup(void *ta_parent, void *ptr, size_t size);
+void *ta_xmemdup(void *ta_parent, const void *ptr, size_t size);
 void *ta_xrealloc_size(void *ta_parent, void *ptr, size_t size);
 
 #ifndef TA_NO_WRAPPERS

@@ -75,7 +75,7 @@ void *ta_steal_(void *ta_parent, void *ptr)
 
 /* Duplicate the memory at ptr with the given size.
  */
-void *ta_memdup(void *ta_parent, void *ptr, size_t size)
+void *ta_memdup(void *ta_parent, const void *ptr, size_t size)
 {
     if (!ptr) {
         assert(!size);
@@ -307,7 +307,7 @@ void *ta_xsteal_(void *ta_parent, void *ptr)
     return ptr;
 }
 
-void *ta_xmemdup(void *ta_parent, void *ptr, size_t size)
+void *ta_xmemdup(void *ta_parent, const void *ptr, size_t size)
 {
     void *new = ta_memdup(ta_parent, ptr, size);
     ta_oom_b(new || !ptr);
