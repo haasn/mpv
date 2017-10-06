@@ -68,3 +68,13 @@ pl_named_filters
 pl_find_named_filter
 pl_filter_generate
 pl_filter_free
+ra_format_is_ordered
+ra_format_is_regular
+ra_var_type_size
+ra_var_host_layout
+ra_tex_create
+ra_tex_destroy
+ra_buf_create
+ra_buf_destroy
+ra_find_texture_format
+ra_find_named_format

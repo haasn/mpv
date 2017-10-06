@@ -154,6 +154,7 @@ def build(ctx):
         ( "libplacebo/colorspace.c" ),
         ( "libplacebo/context.c" ),
         ( "libplacebo/filters.c" ),
+        ( "libplacebo/ra.c" ),
 
         ## Misc helpers without external dependencies (shared with mpv)
         ( "bstr/bstr.c" ),
@@ -682,7 +683,7 @@ def build(ctx):
             VERSION     = apiver,
         )
 
-        headers = ['context.h', 'colorspace.h', 'filters.h']
+        headers = ['common.h', 'context.h', 'colorspace.h', 'filters.h', 'ra.h']
         for f in headers:
             ctx.install_as(ctx.env.INCDIR + '/libplacebo/' + f,
                            'libplacebo/public/' + f)
