@@ -48,13 +48,13 @@ size_t ra_var_type_size(enum ra_var_type type)
     }
 }
 
-struct ra_var_layout ra_var_host_layout(const struct ra_var *var)
+struct ra_var_layout ra_var_host_layout(const struct ra_var var)
 {
-    size_t row_size = ra_var_type_size(var->type) * var->dim_v;
+    size_t row_size = ra_var_type_size(var.type) * var.dim_v;
     return (struct ra_var_layout) {
         .align  = 1,
         .stride = row_size,
-        .size   = row_size * var->dim_m,
+        .size   = row_size * var.dim_m,
     };
 }
 
