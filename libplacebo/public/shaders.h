@@ -206,7 +206,7 @@ const struct pl_color_map_params pl_color_map_recommended_params;
 // caller (e.g. as part of a previous linear light scaling operation).
 void pl_shader_color_map(struct pl_shader *s,
                          const struct pl_color_map_params *params,
-                         struct pl_color src, struct pl_color dst,
+                         struct pl_color_space src, struct pl_color_space dst,
                          bool prelinearized);
 
 #endif // LIBPLACEBO_SHADERS_H

@@ -192,7 +192,7 @@ static int control(struct vo *vo, uint32_t request, void *data)
         if (!screen)
             break; // redirect to backend
         // set image parameters according to the display, if possible
-        screen->params.color = gl_video_get_output_colorspace(p->renderer);
+        screen->params.color_space = gl_video_get_output_colorspace(p->renderer);
         *(struct mp_image **)data = screen;
         return true;
     }

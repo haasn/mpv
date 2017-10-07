@@ -170,8 +170,8 @@ static int reconfig(struct vf_instance *vf, struct mp_image_params *in,
     struct mp_imgfmt_desc d_fmt = mp_imgfmt_get_desc(out->imgfmt);
     // keep colorspace settings if the data stays in yuv
     if (!(s_fmt.flags & MP_IMGFLAG_YUV) || !(d_fmt.flags & MP_IMGFLAG_YUV)) {
-        out->color.space = PL_COLOR_SPACE_UNKNOWN;
-        out->color.levels = PL_COLOR_LEVELS_UNKNOWN;
+        out->color_repr.sys = PL_COLOR_SYSTEM_UNKNOWN;
+        out->color_repr.levels = PL_COLOR_LEVELS_UNKNOWN;
     }
     mp_image_params_guess_csp(out);
 

@@ -709,24 +709,24 @@ static void update_image_params(struct dec_video *vd, AVFrame *frame,
     sd = av_frame_get_side_data(frame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
     if (sd) {
         AVContentLightMetadata *clm = (AVContentLightMetadata *)sd->data;
-        params->color.sig_peak = clm->MaxCLL / PL_COLOR_REF_WHITE;
+        params->color_space.sig_peak = clm->MaxCLL / PL_COLOR_REF_WHITE;
     }
 #endif
 
 #if LIBAVCODEC_VERSION_MICRO >= 100
     // Otherwise, try getting the mastering metadata if available
     sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
-    if (!params->color.sig_peak && sd) {
+    if (!params->color_space.sig_peak && sd) {
         AVMasteringDisplayMetadata *mdm = (AVMasteringDisplayMetadata *)sd->data;
         if (mdm->has_luminance)
-            params->color.sig_peak = av_q2d(mdm->max_luminance) / PL_COLOR_REF_WHITE;
+            params->color_space.sig_peak = av_q2d(mdm->max_luminance) / PL_COLOR_REF_WHITE;
     }
 #endif
 
-    if (params->color.sig_peak) {
-        ctx->cached_sig_peak = params->color.sig_peak;
+    if (params->color_space.sig_peak) {
+        ctx->cached_sig_peak = params->color_space.sig_peak;
     } else {
-        params->color.sig_peak = ctx->cached_sig_peak;
+        params->color_space.sig_peak = ctx->cached_sig_peak;
     }
 
     params->rotate = vd->codec->rotate;

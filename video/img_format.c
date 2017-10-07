@@ -319,19 +319,19 @@ static bool validate_regular_imgfmt(const struct mp_regular_imgfmt *fmt)
     return true;
 }
 
-enum pl_color_space mp_imgfmt_get_forced_csp(int imgfmt)
+enum pl_color_system mp_imgfmt_get_forced_csp(int imgfmt)
 {
     const AVPixFmtDescriptor *pixdesc =
         av_pix_fmt_desc_get(imgfmt2pixfmt(imgfmt));
 
     // FFmpeg does not provide a flag for XYZ, so this is the best we can do.
     if (pixdesc && strncmp(pixdesc->name, "xyz", 3) == 0)
-        return PL_COLOR_SPACE_XYZ;
+        return PL_COLOR_SYSTEM_XYZ;
 
     if (pixdesc && (pixdesc->flags & AV_PIX_FMT_FLAG_RGB))
-        return PL_COLOR_SPACE_RGB;
+        return PL_COLOR_SYSTEM_RGB;
 
-    return PL_COLOR_SPACE_UNKNOWN;
+    return PL_COLOR_SYSTEM_UNKNOWN;
 }
 
 enum mp_component_type mp_imgfmt_get_component_type(int imgfmt)

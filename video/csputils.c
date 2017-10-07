@@ -33,15 +33,15 @@
 #include "options/m_option.h"
 
 const struct m_opt_choice_alternatives mp_csp_names[] = {
-    {"auto",        PL_COLOR_SPACE_UNKNOWN},
-    {"bt.601",      PL_COLOR_SPACE_BT_601},
-    {"bt.709",      PL_COLOR_SPACE_BT_709},
-    {"smpte-240m",  PL_COLOR_SPACE_SMPTE_240M},
-    {"bt.2020-ncl", PL_COLOR_SPACE_BT_2020_NC},
-    {"bt.2020-cl",  PL_COLOR_SPACE_BT_2020_C},
-    {"rgb",         PL_COLOR_SPACE_RGB},
-    {"xyz",         PL_COLOR_SPACE_XYZ},
-    {"ycgco",       PL_COLOR_SPACE_YCGCO},
+    {"auto",        PL_COLOR_SYSTEM_UNKNOWN},
+    {"bt.601",      PL_COLOR_SYSTEM_BT_601},
+    {"bt.709",      PL_COLOR_SYSTEM_BT_709},
+    {"smpte-240m",  PL_COLOR_SYSTEM_SMPTE_240M},
+    {"bt.2020-ncl", PL_COLOR_SYSTEM_BT_2020_NC},
+    {"bt.2020-cl",  PL_COLOR_SYSTEM_BT_2020_C},
+    {"rgb",         PL_COLOR_SYSTEM_RGB},
+    {"xyz",         PL_COLOR_SYSTEM_XYZ},
+    {"ycgco",       PL_COLOR_SYSTEM_YCGCO},
     {0}
 };
 
@@ -126,18 +126,18 @@ const struct m_opt_choice_alternatives mp_stereo3d_names[] = {
     {0}
 };
 
-enum pl_color_space avcol_spc_to_mp_csp(int avcolorspace)
+enum pl_color_system avcol_spc_to_mp_csp(int avcolorspace)
 {
     switch (avcolorspace) {
-    case AVCOL_SPC_BT709:       return PL_COLOR_SPACE_BT_709;
-    case AVCOL_SPC_BT470BG:     return PL_COLOR_SPACE_BT_601;
-    case AVCOL_SPC_BT2020_NCL:  return PL_COLOR_SPACE_BT_2020_NC;
-    case AVCOL_SPC_BT2020_CL:   return PL_COLOR_SPACE_BT_2020_C;
-    case AVCOL_SPC_SMPTE170M:   return PL_COLOR_SPACE_BT_601;
-    case AVCOL_SPC_SMPTE240M:   return PL_COLOR_SPACE_SMPTE_240M;
-    case AVCOL_SPC_RGB:         return PL_COLOR_SPACE_RGB;
-    case AVCOL_SPC_YCOCG:       return PL_COLOR_SPACE_YCGCO;
-    default:                    return PL_COLOR_SPACE_UNKNOWN;
+    case AVCOL_SPC_BT709:       return PL_COLOR_SYSTEM_BT_709;
+    case AVCOL_SPC_BT470BG:     return PL_COLOR_SYSTEM_BT_601;
+    case AVCOL_SPC_BT2020_NCL:  return PL_COLOR_SYSTEM_BT_2020_NC;
+    case AVCOL_SPC_BT2020_CL:   return PL_COLOR_SYSTEM_BT_2020_C;
+    case AVCOL_SPC_SMPTE170M:   return PL_COLOR_SYSTEM_BT_601;
+    case AVCOL_SPC_SMPTE240M:   return PL_COLOR_SYSTEM_SMPTE_240M;
+    case AVCOL_SPC_RGB:         return PL_COLOR_SYSTEM_RGB;
+    case AVCOL_SPC_YCOCG:       return PL_COLOR_SYSTEM_YCGCO;
+    default:                    return PL_COLOR_SYSTEM_UNKNOWN;
     }
 }
 
@@ -191,17 +191,17 @@ enum pl_chroma_location avchroma_location_to_mp(int avloc)
     }
 }
 
-int mp_csp_to_avcol_spc(enum pl_color_space csp)
+int mp_csp_to_avcol_spc(enum pl_color_system csp)
 {
     switch (csp) {
-    case PL_COLOR_SPACE_BT_709:     return AVCOL_SPC_BT709;
-    case PL_COLOR_SPACE_BT_601:     return AVCOL_SPC_BT470BG;
-    case PL_COLOR_SPACE_BT_2020_NC: return AVCOL_SPC_BT2020_NCL;
-    case PL_COLOR_SPACE_BT_2020_C:  return AVCOL_SPC_BT2020_CL;
-    case PL_COLOR_SPACE_SMPTE_240M: return AVCOL_SPC_SMPTE240M;
-    case PL_COLOR_SPACE_RGB:        return AVCOL_SPC_RGB;
-    case PL_COLOR_SPACE_YCGCO:      return AVCOL_SPC_YCOCG;
-    default:                        return AVCOL_SPC_UNSPECIFIED;
+    case PL_COLOR_SYSTEM_BT_709:     return AVCOL_SPC_BT709;
+    case PL_COLOR_SYSTEM_BT_601:     return AVCOL_SPC_BT470BG;
+    case PL_COLOR_SYSTEM_BT_2020_NC: return AVCOL_SPC_BT2020_NCL;
+    case PL_COLOR_SYSTEM_BT_2020_C:  return AVCOL_SPC_BT2020_CL;
+    case PL_COLOR_SYSTEM_SMPTE_240M: return AVCOL_SPC_SMPTE240M;
+    case PL_COLOR_SYSTEM_RGB:        return AVCOL_SPC_RGB;
+    case PL_COLOR_SYSTEM_YCGCO:      return AVCOL_SPC_YCOCG;
+    default:                         return AVCOL_SPC_UNSPECIFIED;
     }
 }
 
@@ -314,9 +314,9 @@ void mp_map_fixp_color(int ibits, int in[3], int obits, int out[3],
     }
 }
 
-struct pl_color mp_csp_from_image_params(const struct mp_image_params *imgparams)
+struct pl_color_repr mp_csp_from_image_params(const struct mp_image_params *imgparams)
 {
     struct mp_image_params p = *imgparams;
     mp_image_params_guess_csp(&p); // ensure consistency
-    return p.color;
+    return p.color_repr;
 }

@@ -105,7 +105,7 @@ bool mp_sws_supported_format(int imgfmt)
         && sws_isSupportedOutput(av_format);
 }
 
-static int mp_csp_to_sws_colorspace(enum pl_color_space csp)
+static int mp_csp_to_sws_colorspace(enum pl_color_system csp)
 {
     // The SWS_CS_* macros are just convenience redefinitions of the
     // AVCOL_SPC_* macros, inside swscale.h.
@@ -192,11 +192,11 @@ int mp_sws_reinit(struct mp_sws_context *ctx)
         return -1;
     }
 
-    int s_csp = mp_csp_to_sws_colorspace(src->color.space);
-    int s_range = src->color.levels == PL_COLOR_LEVELS_PC;
+    int s_csp = mp_csp_to_sws_colorspace(src->color_repr.sys);
+    int s_range = src->color_repr.levels == PL_COLOR_LEVELS_PC;
 
-    int d_csp = mp_csp_to_sws_colorspace(dst->color.space);
-    int d_range = dst->color.levels == PL_COLOR_LEVELS_PC;
+    int d_csp = mp_csp_to_sws_colorspace(dst->color_repr.sys);
+    int d_range = dst->color_repr.levels == PL_COLOR_LEVELS_PC;
 
     // Work around libswscale bug #1852 (fixed in ffmpeg commit 8edf9b1fa):
     // setting range flags for RGB gives random bogus results.

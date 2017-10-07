@@ -30,12 +30,12 @@
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vaapi.h>
 
-int va_get_colorspace_flag(enum pl_color_space csp)
+int va_get_colorspace_flag(enum pl_color_system csp)
 {
     switch (csp) {
-    case PL_COLOR_SPACE_BT_601:         return VA_SRC_BT601;
-    case PL_COLOR_SPACE_BT_709:         return VA_SRC_BT709;
-    case PL_COLOR_SPACE_SMPTE_240M:     return VA_SRC_SMPTE_240;
+    case PL_COLOR_SYSTEM_BT_601:         return VA_SRC_BT601;
+    case PL_COLOR_SYSTEM_BT_709:         return VA_SRC_BT709;
+    case PL_COLOR_SYSTEM_SMPTE_240M:     return VA_SRC_SMPTE_240;
     }
     return 0;
 }

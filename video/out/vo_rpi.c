@@ -586,7 +586,7 @@ static int query_format(struct vo *vo, int format)
     return format == IMGFMT_MMAL || format == IMGFMT_420P;
 }
 
-static MMAL_FOURCC_T map_csp(enum pl_color_space csp)
+static MMAL_FOURCC_T map_csp(enum pl_color_system csp)
 {
     switch (csp) {
     case PL_COLOR_BT_601:     return MMAL_COLOR_SPACE_ITUR_BT601;

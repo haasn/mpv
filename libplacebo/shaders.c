@@ -476,7 +476,7 @@ static void pl_shader_tone_map(struct pl_shader *s, float ref_peak,
 
 void pl_shader_color_map(struct pl_shader *s,
                          const struct pl_color_map_params *params,
-                         struct pl_color src, struct pl_color dst,
+                         struct pl_color_space src, struct pl_color_space dst,
                          bool prelinearized)
 {
     GLSL("// pl_shader_color_map\n");
@@ -526,7 +526,7 @@ void pl_shader_color_map(struct pl_shader *s,
         struct pl_raw_primaries csp_src = pl_raw_primaries_get(src.primaries),
                                 csp_dst = pl_raw_primaries_get(dst.primaries);
         struct pl_color_matrix cms_matrix;
-        cms_matrix = pl_get_rgb2rgb_matrix(csp_src, csp_dst, params->intent);
+        cms_matrix = pl_get_color_mapping_matrix(csp_src, csp_dst, params->intent);
         pl_shader_var_mat3(s, "cms_matrix", false, cms_matrix.m);
         GLSL("color.rgb = cms_matrix * color.rgb;\n");
         // Since this can reduce the gamut, figure out by how much

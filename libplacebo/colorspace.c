@@ -20,38 +20,58 @@
 #include "common.h"
 #include "public/colorspace.h"
 
-bool pl_color_space_is_ycbcr_like(enum pl_color_space space)
+bool pl_color_system_is_ycbcr_like(enum pl_color_system sys)
 {
-    switch (space) {
-    case PL_COLOR_SPACE_RGB:
-    case PL_COLOR_SPACE_XYZ:
+    switch (sys) {
+    case PL_COLOR_SYSTEM_RGB:
+    case PL_COLOR_SYSTEM_XYZ:
         return false;
-    case PL_COLOR_SPACE_UNKNOWN:
-    case PL_COLOR_SPACE_BT_601:
-    case PL_COLOR_SPACE_BT_709:
-    case PL_COLOR_SPACE_SMPTE_240M:
-    case PL_COLOR_SPACE_BT_2020_NC:
-    case PL_COLOR_SPACE_BT_2020_C:
-    case PL_COLOR_SPACE_YCGCO:
+    case PL_COLOR_SYSTEM_UNKNOWN:
+    case PL_COLOR_SYSTEM_BT_601:
+    case PL_COLOR_SYSTEM_BT_709:
+    case PL_COLOR_SYSTEM_SMPTE_240M:
+    case PL_COLOR_SYSTEM_BT_2020_NC:
+    case PL_COLOR_SYSTEM_BT_2020_C:
+    case PL_COLOR_SYSTEM_YCGCO:
         return true;
     default: abort();
     };
 }
 
-enum pl_color_space pl_color_space_guess_ycbcr(int width, int height)
+enum pl_color_system pl_color_system_guess_ycbcr(int width, int height)
 {
     if (width >= 1280 || height > 576) {
         // Typical HD content
-        return PL_COLOR_SPACE_BT_709;
+        return PL_COLOR_SYSTEM_BT_709;
     } else {
         // Typical SD content
-        return PL_COLOR_SPACE_BT_601;
+        return PL_COLOR_SYSTEM_BT_601;
     }
 }
 
-float pl_color_space_texture_mul(enum pl_color_space space,
-                                 int old_bits, int new_bits)
+const struct pl_color_repr pl_color_repr_unknown = {0};
+
+void pl_color_repr_merge(struct pl_color_repr *orig,
+                         const struct pl_color_repr *new)
 {
+    if (!orig->sys)
+        orig->sys = new->sys;
+    if (!orig->levels)
+        orig->levels = new->levels;
+    if (!orig->bit_depth)
+        orig->bit_depth = new->bit_depth;
+}
+
+bool pl_color_repr_equal(struct pl_color_repr c1, struct pl_color_repr c2)
+{
+    return c1.sys == c2.sys &&
+           c1.levels == c2.levels &&
+           c1.bit_depth == c2.bit_depth;
+}
+
+float pl_color_repr_texture_mul(struct pl_color_repr repr, int new_bits)
+{
+    int old_bits = repr.bit_depth;
     int hi_bits = old_bits > new_bits ? old_bits : new_bits;
     int lo_bits = old_bits < new_bits ? old_bits : new_bits;
     assert(hi_bits >= lo_bits);
@@ -60,7 +80,7 @@ float pl_color_space_texture_mul(enum pl_color_space space,
     if (!hi_bits || !lo_bits)
         return mult;
 
-    if (pl_color_space_is_ycbcr_like(space)) {
+    if (pl_color_system_is_ycbcr_like(repr.sys)) {
         // High bit depth YUV uses a range shifted from 8-bit
         mult = (1LL << lo_bits) / ((1LL << hi_bits) - 1.0) * 255.0 / 256;
     } else {
@@ -147,14 +167,35 @@ bool pl_color_light_is_scene_referred(enum pl_color_light light)
     }
 }
 
-const struct pl_color pl_color_unknown = {0};
+const struct pl_color_space pl_color_space_unknown = {0};
 
-void pl_color_merge(struct pl_color *orig, const struct pl_color *new)
+const struct pl_color_space pl_color_space_srgb = {
+    .primaries = PL_COLOR_PRIM_BT_709,
+    .transfer  = PL_COLOR_TRC_SRGB,
+    .light     = PL_COLOR_LIGHT_DISPLAY,
+};
+
+const struct pl_color_space pl_color_space_bt709 = {
+    .primaries = PL_COLOR_PRIM_BT_709,
+    .transfer  = PL_COLOR_TRC_BT_1886,
+    .light     = PL_COLOR_LIGHT_DISPLAY,
+};
+
+const struct pl_color_space pl_color_space_hdr10 = {
+    .primaries = PL_COLOR_PRIM_BT_2020,
+    .transfer  = PL_COLOR_TRC_PQ,
+    .light     = PL_COLOR_LIGHT_DISPLAY,
+};
+
+const struct pl_color_space pl_color_space_bt2020_hlg = {
+    .primaries = PL_COLOR_PRIM_BT_2020,
+    .transfer  = PL_COLOR_TRC_HLG,
+    .light     = PL_COLOR_LIGHT_SCENE_HLG,
+};
+
+void pl_color_space_merge(struct pl_color_space *orig,
+                          const struct pl_color_space *new)
 {
-    if (!orig->space)
-        orig->space = new->space;
-    if (!orig->levels)
-        orig->levels = new->levels;
     if (!orig->primaries)
         orig->primaries = new->primaries;
     if (!orig->transfer)
@@ -165,11 +206,9 @@ void pl_color_merge(struct pl_color *orig, const struct pl_color *new)
         orig->sig_peak = new->sig_peak;
 }
 
-bool pl_color_equal(struct pl_color c1, struct pl_color c2)
+bool pl_color_space_equal(struct pl_color_space c1, struct pl_color_space c2)
 {
-    return c1.space     == c2.space &&
-           c1.levels    == c2.levels &&
-           c1.primaries == c2.primaries &&
+    return c1.primaries == c2.primaries &&
            c1.transfer  == c2.transfer &&
            c1.light     == c2.light &&
            c1.sig_peak  == c2.sig_peak;
@@ -474,9 +513,9 @@ static void apply_chromatic_adaptation(struct pl_cie_xy src,
     mul_matrix3x3(m, tmp);
 }
 
-struct pl_color_matrix pl_get_rgb2rgb_matrix(struct pl_raw_primaries src,
-                                             struct pl_raw_primaries dst,
-                                             enum pl_rendering_intent intent)
+struct pl_color_matrix pl_get_color_mapping_matrix(struct pl_raw_primaries src,
+                                                   struct pl_raw_primaries dst,
+                                                   enum pl_rendering_intent intent)
 {
     // In saturation mapping, we don't care about accuracy and just want
     // primaries to map to primaries, making this an identity transformation.
@@ -536,19 +575,19 @@ static struct pl_color_matrix luma_coeffs(float lr, float lg, float lb)
     }};
 }
 
-struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
-                                                struct pl_color_adjustment params,
-                                                int in_bits, int out_bits,
-                                                enum pl_color_levels out_levels)
+struct pl_color_transform pl_get_decoding_matrix(struct pl_color_repr repr,
+                                                 struct pl_color_adjustment params,
+                                                 enum pl_color_levels out_levels,
+                                                 int out_bits)
 {
     struct pl_color_matrix m;
-    switch (color.space) {
-    case PL_COLOR_SPACE_UNKNOWN: // fall through
-    case PL_COLOR_SPACE_BT_709:     m = luma_coeffs(0.2126, 0.7152, 0.0722); break;
-    case PL_COLOR_SPACE_BT_601:     m = luma_coeffs(0.2990, 0.5870, 0.1140); break;
-    case PL_COLOR_SPACE_SMPTE_240M: m = luma_coeffs(0.2122, 0.7013, 0.0865); break;
-    case PL_COLOR_SPACE_BT_2020_NC: m = luma_coeffs(0.2627, 0.6780, 0.0593); break;
-    case PL_COLOR_SPACE_BT_2020_C:
+    switch (repr.sys) {
+    case PL_COLOR_SYSTEM_UNKNOWN: // fall through
+    case PL_COLOR_SYSTEM_BT_709:     m = luma_coeffs(0.2126, 0.7152, 0.0722); break;
+    case PL_COLOR_SYSTEM_BT_601:     m = luma_coeffs(0.2990, 0.5870, 0.1140); break;
+    case PL_COLOR_SYSTEM_SMPTE_240M: m = luma_coeffs(0.2122, 0.7013, 0.0865); break;
+    case PL_COLOR_SYSTEM_BT_2020_NC: m = luma_coeffs(0.2627, 0.6780, 0.0593); break;
+    case PL_COLOR_SYSTEM_BT_2020_C:
         // Note: This outputs into the [-0.5,0.5] range for chroma information.
         m = (struct pl_color_matrix) {{
             {0, 0, 1},
@@ -556,22 +595,24 @@ struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
             {0, 1, 0}
         }};
         break;
-    case PL_COLOR_SPACE_YCGCO:
+    case PL_COLOR_SYSTEM_YCGCO:
         m = (struct pl_color_matrix) {{
             {1,  -1,  1},
             {1,   1,  0},
             {1,  -1, -1},
         }};
         break;
-    case PL_COLOR_SPACE_RGB:
+    case PL_COLOR_SYSTEM_RGB:
         m = (struct pl_color_matrix) {{
             {1, 0, 0},
             {0, 1, 0},
             {0, 0, 1}
         }};
         break;
-    case PL_COLOR_SPACE_XYZ:
-        m = pl_get_xyz2rgb_matrix(pl_raw_primaries_get(color.space));
+    case PL_COLOR_SYSTEM_XYZ:
+        // For lack of anything saner to do, just assume the caller wants
+        // BT.709 primaries, which is a reasonable assumption.
+        m = pl_get_xyz2rgb_matrix(pl_raw_primaries_get(PL_COLOR_PRIM_BT_709));
         break;
     default: abort();
     }
@@ -579,7 +620,7 @@ struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
     struct pl_color_transform out = { .mat = m };
 
     // Apply hue and saturation in the correct way depending on the colorspace.
-    if (pl_color_space_is_ycbcr_like(color.space)) {
+    if (pl_color_system_is_ycbcr_like(repr.sys)) {
         // Hue is equivalent to rotating input [U, V] subvector around the origin.
         // Saturation scales [U, V].
         float huecos = params.saturation * cos(params.hue);
@@ -593,8 +634,8 @@ struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
     // FIXME: apply saturation for RGB
 
     float s = 1.0;
-    if (in_bits && out_bits)
-        s = pl_color_space_texture_mul(color.space, in_bits, out_bits);
+    if (repr.bit_depth && out_bits)
+        s = pl_color_repr_texture_mul(repr, out_bits);
 
     // As a convenience, we use the 255-scale values in the code below
     s /= 255.0;
@@ -609,8 +650,8 @@ struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
         anyfull = {  0*s, 255*s, 255*s/2, 0 }, // cmax picked to make cmul=ymul
         yuvlev;
 
-    if (pl_color_space_is_ycbcr_like(color.space)) {
-        switch (color.levels) {
+    if (pl_color_system_is_ycbcr_like(repr.sys)) {
+        switch (repr.levels) {
         case PL_COLOR_LEVELS_UNKNOWN: // fall through
         case PL_COLOR_LEVELS_TV: yuvlev = yuvlim; break;
         case PL_COLOR_LEVELS_PC: yuvlev = yuvfull; break;
@@ -638,16 +679,6 @@ struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
     // Contrast scales the output value range (gain)
     ymul *= params.contrast;
     cmul *= params.contrast;
-
-    // For the brightness mapping, we need to ensure it makes sense given the
-    // range of the source. So apply some extra adjustments
-    params.brightness /= pl_color_transfer_nominal_peak(color.transfer);
-
-    // If the source is linear light, we also need to linearize the brightness
-    // adjustment in order to scale it into the new value range. A gamma of 2
-    // (squaring the value) is a reasonable approximation.
-    if (color.transfer == PL_COLOR_TRC_LINEAR)
-        params.brightness *= fabs(params.brightness);
 
     for (int i = 0; i < 3; i++) {
         out.mat.m[i][0] *= ymul;

@@ -82,13 +82,13 @@ void mp_csp_equalizer_state_get(struct mp_csp_equalizer_state *state,
                                 struct pl_color_adjustment *out_params,
                                 enum pl_color_levels *out_levels);
 
-enum pl_color_space avcol_spc_to_mp_csp(int avcolorspace);
+enum pl_color_system avcol_spc_to_mp_csp(int avcolorspace);
 enum pl_color_levels avcol_range_to_mp_csp_levels(int avrange);
 enum pl_color_primaries avcol_pri_to_mp_csp_prim(int avpri);
 enum pl_color_transfer avcol_trc_to_mp_csp_trc(int avtrc);
 enum pl_chroma_location avchroma_location_to_mp(int avloc);
 
-int mp_csp_to_avcol_spc(enum pl_color_space csp);
+int mp_csp_to_avcol_spc(enum pl_color_system csp);
 int mp_csp_levels_to_avcol_range(enum pl_color_levels levels);
 int mp_csp_prim_to_avcol_pri(enum pl_color_primaries prim);
 int mp_csp_trc_to_avcol_trc(enum pl_color_transfer trc);
@@ -98,4 +98,4 @@ void mp_map_fixp_color(int ibits, int in[3], int obits, int out[3],
                        struct pl_color_transform t);
 
 struct mp_image_params;
-struct pl_color mp_csp_from_image_params(const struct mp_image_params *imgparams);
+struct pl_color_repr mp_csp_from_image_params(const struct mp_image_params *imgparams);

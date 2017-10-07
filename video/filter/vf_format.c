@@ -92,25 +92,25 @@ static int reconfig(struct vf_instance *vf, struct mp_image_params *in,
     if (p->outfmt)
         out->imgfmt = p->outfmt;
     if (p->colormatrix)
-        out->color.space = p->colormatrix;
+        out->color_repr.sys = p->colormatrix;
     if (p->colorlevels)
-        out->color.levels = p->colorlevels;
+        out->color_repr.levels = p->colorlevels;
     if (p->primaries)
-        out->color.primaries = p->primaries;
+        out->color_space.primaries = p->primaries;
     if (p->gamma) {
-        out->color.transfer = p->gamma;
-        if (in->color.transfer != out->color.transfer) {
+        out->color_space.transfer = p->gamma;
+        if (in->color_space.transfer != out->color_space.transfer) {
             // When changing the gamma function explicitly, also reset stuff
             // related to the gamma function since that information will almost
             // surely be false now and have to be re-inferred
-            out->color.sig_peak = 0.0;
-            out->color.light = PL_COLOR_LIGHT_UNKNOWN;
+            out->color_space.sig_peak = 0.0;
+            out->color_space.light = PL_COLOR_LIGHT_UNKNOWN;
         }
     }
     if (p->sig_peak)
-        out->color.sig_peak = p->sig_peak;
+        out->color_space.sig_peak = p->sig_peak;
     if (p->light)
-        out->color.light = p->light;
+        out->color_space.light = p->light;
     if (p->chroma_location)
         out->chroma_location = p->chroma_location;
     if (p->stereo_in)

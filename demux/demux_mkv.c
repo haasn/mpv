@@ -108,7 +108,8 @@ typedef struct mkv_track {
     double v_frate;
     uint32_t colorspace;
     int stereo_mode;
-    struct pl_color color;
+    struct pl_color_repr color_repr;
+    struct pl_color_space color_space;
     struct mp_spherical_params spherical;
 
     uint32_t a_channels, a_bps;
@@ -551,36 +552,36 @@ static void parse_trackcolour(struct demuxer *demuxer, struct mkv_track *track,
     // 23001-8:2013/DCOR1, which is the same order used by libavutil/pixfmt.h,
     // so we can just re-use our avcol_ conversion functions.
     if (colour->n_matrix_coefficients) {
-        track->color.space = avcol_spc_to_mp_csp(colour->matrix_coefficients);
+        track->color_repr.sys = avcol_spc_to_mp_csp(colour->matrix_coefficients);
         MP_VERBOSE(demuxer, "|    + Matrix: %s\n",
-                   m_opt_choice_str(mp_csp_names, track->color.space));
+                   m_opt_choice_str(mp_csp_names, track->color_repr.sys));
     }
     if (colour->n_primaries) {
-        track->color.primaries = avcol_pri_to_mp_csp_prim(colour->primaries);
+        track->color_space.primaries = avcol_pri_to_mp_csp_prim(colour->primaries);
         MP_VERBOSE(demuxer, "|    + Primaries: %s\n",
-                   m_opt_choice_str(mp_csp_prim_names, track->color.primaries));
+                   m_opt_choice_str(mp_csp_prim_names, track->color_space.primaries));
     }
     if (colour->n_transfer_characteristics) {
-        track->color.transfer = avcol_trc_to_mp_csp_trc(colour->transfer_characteristics);
+        track->color_space.transfer = avcol_trc_to_mp_csp_trc(colour->transfer_characteristics);
         MP_VERBOSE(demuxer, "|    + Transfer: %s\n",
-                   m_opt_choice_str(mp_csp_trc_names, track->color.transfer));
+                   m_opt_choice_str(mp_csp_trc_names, track->color_space.transfer));
     }
     if (colour->n_range) {
-        track->color.levels = avcol_range_to_mp_csp_levels(colour->range);
+        track->color_repr.levels = avcol_range_to_mp_csp_levels(colour->range);
         MP_VERBOSE(demuxer, "|    + Levels: %s\n",
-                   m_opt_choice_str(mp_csp_levels_names, track->color.levels));
+                   m_opt_choice_str(mp_csp_levels_names, track->color_repr.levels));
     }
     if (colour->n_max_cll) {
-        track->color.sig_peak = colour->max_cll / PL_COLOR_REF_WHITE;
+        track->color_space.sig_peak = colour->max_cll / PL_COLOR_REF_WHITE;
         MP_VERBOSE(demuxer, "|    + MaxCLL: %"PRIu64"\n", colour->max_cll);
     }
     // if MaxCLL is unavailable, try falling back to the mastering metadata
-    if (!track->color.sig_peak && colour->n_mastering_metadata) {
+    if (!track->color_space.sig_peak && colour->n_mastering_metadata) {
         struct ebml_mastering_metadata *mastering = &colour->mastering_metadata;
 
         if (mastering->n_luminance_max) {
-            track->color.sig_peak = mastering->luminance_max / PL_COLOR_REF_WHITE;
-            MP_VERBOSE(demuxer, "|    + HDR peak: %f\n", track->color.sig_peak);
+            track->color_space.sig_peak = mastering->luminance_max / PL_COLOR_REF_WHITE;
+            MP_VERBOSE(demuxer, "|    + HDR peak: %f\n", track->color_space.sig_peak);
         }
     }
 }
@@ -1499,7 +1500,8 @@ static int demux_mkv_open_video(demuxer_t *demuxer, mkv_track_t *track)
     sh_v->par_h = p.p_h;
 
     sh_v->stereo_mode = track->stereo_mode;
-    sh_v->color = track->color;
+    sh_v->color_repr = track->color_repr;
+    sh_v->color_space = track->color_space;
     sh_v->spherical = track->spherical;
 
 done:

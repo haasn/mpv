@@ -234,12 +234,13 @@ static void fix_image_params(struct dec_video *d_video,
     }
     p.stereo_out = opts->video_stereo_mode;
 
-    pl_color_merge(&p.color, &c->color);
+    pl_color_repr_merge(&p.color_repr, &c->color_repr);
+    pl_color_space_merge(&p.color_space, &c->color_space);
 
     // Sanitize the HDR peak. Sadly necessary
-    if (!is_valid_peak(p.color.sig_peak)) {
-        MP_WARN(d_video, "Invalid HDR peak in stream: %f\n", p.color.sig_peak);
-        p.color.sig_peak = 0.0;
+    if (!is_valid_peak(p.color_space.sig_peak)) {
+        MP_WARN(d_video, "Invalid HDR peak in stream: %f\n", p.color_space.sig_peak);
+        p.color_space.sig_peak = 0.0;
     }
 
     p.spherical = c->spherical;

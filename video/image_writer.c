@@ -107,10 +107,10 @@ static bool write_lavc(struct image_writer_ctx *ctx, mp_image_t *image, FILE *fp
     avctx->time_base = AV_TIME_BASE_Q;
     avctx->width = image->w;
     avctx->height = image->h;
-    avctx->color_range = mp_csp_levels_to_avcol_range(image->params.color.levels);
+    avctx->color_range = mp_csp_levels_to_avcol_range(image->params.color_repr.levels);
     avctx->pix_fmt = imgfmt2pixfmt(image->imgfmt);
     // Annoying deprecated garbage for the jpg encoder.
-    if (image->params.color.levels == PL_COLOR_LEVELS_PC)
+    if (image->params.color_repr.levels == PL_COLOR_LEVELS_PC)
         avctx->pix_fmt = replace_j_format(avctx->pix_fmt);
     if (avctx->pix_fmt == AV_PIX_FMT_NONE) {
         MP_ERR(ctx, "Image format %s not supported by lavc.\n",
@@ -141,8 +141,8 @@ static bool write_lavc(struct image_writer_ctx *ctx, mp_image_t *image, FILE *fp
     pic->height = avctx->height;
     pic->color_range = avctx->color_range;
     if (ctx->opts->tag_csp) {
-        pic->color_primaries = mp_csp_prim_to_avcol_pri(image->params.color.primaries);
-        pic->color_trc = mp_csp_trc_to_avcol_trc(image->params.color.transfer);
+        pic->color_primaries = mp_csp_prim_to_avcol_pri(image->params.color_space.primaries);
+        pic->color_trc = mp_csp_trc_to_avcol_trc(image->params.color_space.transfer);
     }
 
     int ret = avcodec_send_frame(avctx, pic);
@@ -302,11 +302,11 @@ struct mp_image *convert_image(struct mp_image *image, int destfmt,
     mp_image_params_guess_csp(&p);
 
     // If RGB, just assume everything is correct.
-    if (p.color.space != PL_COLOR_SPACE_RGB) {
+    if (p.color_repr.sys != PL_COLOR_SYSTEM_RGB) {
         // Currently, assume what FFmpeg's jpg encoder needs.
         // Of course this works only for non-HDR (no HDR support in libswscale).
-        p.color.levels = PL_COLOR_LEVELS_PC;
-        p.color.space = PL_COLOR_SPACE_BT_601;
+        p.color_repr.sys = PL_COLOR_SYSTEM_BT_601;
+        p.color_repr.levels = PL_COLOR_LEVELS_PC;
         p.chroma_location = PL_CHROMA_CENTER;
         mp_image_params_guess_csp(&p);
     }

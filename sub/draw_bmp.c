@@ -44,7 +44,7 @@ struct sub_cache {
 struct part {
     int change_id;
     int imgfmt;
-    enum pl_color_space colorspace;
+    enum pl_color_system colorspace;
     enum pl_color_levels levels;
     int num_imgs;
     struct sub_cache *imgs;
@@ -193,7 +193,7 @@ static void scale_sb_rgba(struct sub_bitmap *sb, struct mp_image *dst_format,
     mp_image_swscale(sbisrc2, &sbisrc, SWS_BILINEAR);
     unpremultiply_and_split_BGR32(sbisrc2, sba);
 
-    sbi->params.color = dst_format->params.color;
+    sbi->params.color_repr = dst_format->params.color_repr;
     mp_image_swscale(sbi, sbisrc2, SWS_BILINEAR);
 
     talloc_free(sbisrc2);
@@ -254,9 +254,10 @@ static void draw_ass(struct mp_draw_sub_cache *cache, struct mp_rect bb,
     int tex_bits = (bits + 7) / 8 * 8;
 
     if (need_conv) {
-        struct pl_color csp = mp_csp_from_image_params(&temp->params);
-        yuv2rgb = pl_get_yuv2rgb_matrix(csp, pl_color_adjustment_neutral,
-                                        bits, tex_bits, PL_COLOR_LEVELS_PC);
+        struct pl_color_repr csp = mp_csp_from_image_params(&temp->params);
+        csp.bit_depth = bits;
+        yuv2rgb = pl_get_decoding_matrix(csp, pl_color_adjustment_neutral,
+                                         PL_COLOR_LEVELS_PC, tex_bits);
         rgb2yuv = pl_color_transform_invert(yuv2rgb);
     }
 
@@ -364,8 +365,8 @@ static struct part *get_cache(struct mp_draw_sub_cache *cache,
         if (part) {
             if (part->change_id != sbs->change_id
                 || part->imgfmt != format->imgfmt
-                || part->colorspace != format->params.color.space
-                || part->levels != format->params.color.levels)
+                || part->colorspace != format->params.color_repr.sys
+                || part->levels != format->params.color_repr.levels)
             {
                 talloc_free(part);
                 part = NULL;
@@ -377,8 +378,8 @@ static struct part *get_cache(struct mp_draw_sub_cache *cache,
                 .change_id = sbs->change_id,
                 .num_imgs = sbs->num_parts,
                 .imgfmt = format->imgfmt,
-                .levels = format->params.color.levels,
-                .colorspace = format->params.color.space,
+                .levels = format->params.color_repr.levels,
+                .colorspace = format->params.color_repr.sys,
             };
             part->imgs = talloc_zero_array(part, struct sub_cache,
                                            part->num_imgs);
@@ -434,7 +435,7 @@ static struct mp_image *chroma_up(struct mp_draw_sub_cache *cache, int imgfmt,
     // The temp image is always YUV, but src not necessarily.
     // Reduce amount of conversions in YUV case (upsampling/shifting only)
     if (src->fmt.flags & MP_IMGFLAG_YUV)
-        temp->params.color = src->params.color;
+        temp->params.color_repr = src->params.color_repr;
 
     if (src->imgfmt == IMGFMT_420P) {
         assert(imgfmt == IMGFMT_444P);

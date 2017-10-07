@@ -21,33 +21,27 @@
 #include <stdbool.h>
 
 // The underlying colorspace representation (e.g. RGB, XYZ or YCbCr)
-enum pl_color_space {
-    PL_COLOR_SPACE_UNKNOWN = 0,
+enum pl_color_system {
+    PL_COLOR_SYSTEM_UNKNOWN = 0,
     // YCbCr-like colorspaces:
-    PL_COLOR_SPACE_BT_601,      // ITU-R Rec. BT.601 (SD)
-    PL_COLOR_SPACE_BT_709,      // ITU-R Rec. BT.709 (HD)
-    PL_COLOR_SPACE_SMPTE_240M,  // SMPTE-240M
-    PL_COLOR_SPACE_BT_2020_NC,  // ITU-R Rec. BT.2020 (non-constant luminance)
-    PL_COLOR_SPACE_BT_2020_C,   // ITU-R Rec. BT.2020 (constant luminance)
-    PL_COLOR_SPACE_YCGCO,       // YCgCo (derived from RGB)
+    PL_COLOR_SYSTEM_BT_601,      // ITU-R Rec. BT.601 (SD)
+    PL_COLOR_SYSTEM_BT_709,      // ITU-R Rec. BT.709 (HD)
+    PL_COLOR_SYSTEM_SMPTE_240M,  // SMPTE-240M
+    PL_COLOR_SYSTEM_BT_2020_NC,  // ITU-R Rec. BT.2020 (non-constant luminance)
+    PL_COLOR_SYSTEM_BT_2020_C,   // ITU-R Rec. BT.2020 (constant luminance)
+    PL_COLOR_SYSTEM_YCGCO,       // YCgCo (derived from RGB)
     // Other colorspaces:
-    PL_COLOR_SPACE_RGB,         // Red, Green and Blue
-    PL_COLOR_SPACE_XYZ,         // CIE 1931 XYZ
-    PL_COLOR_SPACE_COUNT
+    PL_COLOR_SYSTEM_RGB,         // Red, Green and Blue
+    PL_COLOR_SYSTEM_XYZ,         // CIE 1931 XYZ
+    PL_COLOR_SYSTEM_COUNT
 };
 
-bool pl_color_space_is_ycbcr_like(enum pl_color_space space);
+bool pl_color_system_is_ycbcr_like(enum pl_color_system sys);
 
 // Guesses the best YCbCr-like colorspace based on a image given resolution.
 // This only picks conservative values. (In particular, BT.2020 is never
 // auto-guessed, even for 4K resolution content)
-enum pl_color_space pl_color_space_guess_ycbcr(int width, int height);
-
-// Returns a colorspace-dependent multiplication factor for converting from
-// one bit depth to another. For YCbCr-like color spaces, this is equal to
-// directly shifting the 8-bit range; i.e. 0-255 becomes 0-1020, not 0-1023.
-float pl_color_space_texture_mul(enum pl_color_space space,
-                                 int old_bits, int new_bits);
+enum pl_color_system pl_color_system_guess_ycbcr(int width, int height);
 
 // The numerical range of the representation (where applicable).
 enum pl_color_levels {
@@ -56,6 +50,29 @@ enum pl_color_levels {
     PL_COLOR_LEVELS_PC,         // PC range, e.g. 0-255
     PL_COLOR_LEVELS_COUNT,
 };
+
+// Struct describing the underlying color system and representation. This
+// information is needed to convert an encoded color to a normalized RGB triple
+// in the range 0-1.
+struct pl_color_repr {
+    enum pl_color_system sys;
+    enum pl_color_levels levels;
+    int bit_depth; // applies to each component, 0 = unknown
+};
+
+extern const struct pl_color_repr pl_color_repr_unknown;
+
+// Replaces unknown values in the first struct by those of the second struct.
+void pl_color_repr_merge(struct pl_color_repr *orig,
+                         const struct pl_color_repr *new);
+
+// Returns whether two colorspace representations are exactly identical.
+bool pl_color_repr_equal(struct pl_color_repr c1, struct pl_color_repr c2);
+
+// Returns a representation-dependent multiplication factor for converting from
+// one bit depth to another. For YCbCr-like color spaces, this is equal to
+// directly shifting the 8-bit range; i.e. 0-255 becomes 0-1020, not 0-1023.
+float pl_color_repr_texture_mul(struct pl_color_repr repr, int new_bits);
 
 // The colorspace's primaries (gamut)
 enum pl_color_primaries {
@@ -142,11 +159,10 @@ enum pl_rendering_intent {
     PL_INTENT_ABSOLUTE_COLORIMETRIC = 3
 };
 
-// Struct describing a physical color space. This can be used to represent the
-// different colorspaces at a high level.
-struct pl_color {
-    enum pl_color_space space;
-    enum pl_color_levels levels;
+// Struct describing a physical color space. This information is needed to
+// turn a normalized RGB triple into its physical meaning, as well as to convert
+// between color spaces.
+struct pl_color_space {
     enum pl_color_primaries primaries;
     enum pl_color_transfer transfer;
     enum pl_color_light light;
@@ -156,13 +172,19 @@ struct pl_color {
     float sig_peak;
 };
 
-extern const struct pl_color pl_color_unknown;
-
 // Replaces unknown values in the first struct by those of the second struct.
-void pl_color_merge(struct pl_color *orig, const struct pl_color *new);
+void pl_color_space_merge(struct pl_color_space *orig,
+                          const struct pl_color_space *new);
 
 // Returns whether two colorspaces are exactly identical.
-bool pl_color_equal(struct pl_color c1, struct pl_color c2);
+bool pl_color_space_equal(struct pl_color_space c1, struct pl_color_space c2);
+
+// Some common color spaces
+extern const struct pl_color_space pl_color_space_unknown;
+extern const struct pl_color_space pl_color_space_srgb;
+extern const struct pl_color_space pl_color_space_bt709;
+extern const struct pl_color_space pl_color_space_hdr10;
+extern const struct pl_color_space pl_color_space_bt2020_hlg;
 
 // This represents metadata about extra operations to perform during colorspace
 // conversion, which correspond to artistic adjustments of the color.
@@ -257,23 +279,27 @@ struct pl_color_matrix pl_get_xyz2rgb_matrix(struct pl_raw_primaries prim);
 // primaries to another. This is an RGB->RGB transformation. For rendering
 // intents other than PL_INTENT_ABSOLUTE_COLORIMETRIC, the white point is
 // adapted using the Bradford matrix.
-struct pl_color_matrix pl_get_rgb2rgb_matrix(struct pl_raw_primaries src,
-                                             struct pl_raw_primaries dst,
-                                             enum pl_rendering_intent intent);
+struct pl_color_matrix pl_get_color_mapping_matrix(struct pl_raw_primaries src,
+                                                   struct pl_raw_primaries dst,
+                                                   enum pl_rendering_intent intent);
 
-// Returns a YUV->RGB conversion matrix for a given combination of source
-// space, adjustment parameters, destination color levels, and texture bit
-// depths. This also works for XYZ->RGB and RGB->RGB, which still benefit from
-// the applicable artistic adjustments and levels conversions. The resulting
-// matrix does not perform any gamut mapping, it merely takes care of the
-// conversion to RGB.
+// Returns a color decoding matrix for a given combination of source color
+// representation, adjustment parameters, destination color levels, and output
+// bit depth. If the output bit depth is specified as 0, the bit depth conversion
+// step is skipped.
+//
+// This always performs a conversion to RGB; conversions from arbitrary color
+// representations to other arbitrary other color representations, are
+// currently not supported. Not all color systems support all of the color
+// adjustment parameters. (In particular, hue/sat adjustments are currently
+// only supported for YCbCr-like color systems)
 //
 // Note: For BT.2020 constant-luminance, this outputs chroma information in the
 // range [-0.5, 0.5]. Since the CL system conversion is non-linear, further
 // processing must be done by the caller. The channel order is CrYCb
-struct pl_color_transform pl_get_yuv2rgb_matrix(struct pl_color color,
-                                                struct pl_color_adjustment params,
-                                                int in_bits, int out_bits,
-                                                enum pl_color_levels out_levels);
+struct pl_color_transform pl_get_decoding_matrix(struct pl_color_repr repr,
+                                                 struct pl_color_adjustment params,
+                                                 enum pl_color_levels out_levels,
+                                                 int out_bits);
 
 #endif // LIBPLACEBO_COLORSPACE_H

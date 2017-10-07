@@ -204,7 +204,7 @@ static int mapper_map(struct ra_hwdec_mapper *mapper)
                           0, 0, hw_image->w, hw_image->h,
                           0, 0, hw_image->w, hw_image->h,
                           NULL, 0,
-                          va_get_colorspace_flag(hw_image->params.color.space));
+                          va_get_colorspace_flag(hw_image->params.color_repr.sys));
     CHECK_VA_STATUS(mapper, "vaPutSurface()");
 
     return 0;

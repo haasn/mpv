@@ -525,7 +525,7 @@ static bool render_to_screen(struct priv *p, struct mp_image *mpi)
         }
     }
 
-    int flags = va_get_colorspace_flag(p->image_params.color.space) |
+    int flags = va_get_colorspace_flag(p->image_params.color_repr.sys) |
                 p->scaling | VA_FRAME_PICTURE;
     status = vaPutSurface(p->display,
                           surface,

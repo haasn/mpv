@@ -1156,7 +1156,7 @@ void encode_lavc_fail(struct encode_lavc_context *ctx, const char *format, ...)
 }
 
 bool encode_lavc_set_csp(struct encode_lavc_context *ctx,
-                         AVCodecContext *codec, enum pl_color_space csp)
+                         AVCodecContext *codec, enum pl_color_system csp)
 {
     CHECK_FAIL(ctx, NULL);
 
@@ -1185,7 +1185,7 @@ bool encode_lavc_set_csp_levels(struct encode_lavc_context *ctx,
     return true;
 }
 
-enum pl_color_space encode_lavc_get_csp(struct encode_lavc_context *ctx,
+enum pl_color_system encode_lavc_get_csp(struct encode_lavc_context *ctx,
                                         AVCodecContext *codec)
 {
     CHECK_FAIL(ctx, 0);

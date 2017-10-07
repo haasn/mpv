@@ -93,11 +93,11 @@ static void add_dvd_streams(demuxer_t *demuxer)
             p->dvd_subs[n] = sh;
 
             // emulate the extradata
-            const int ibits = 8, obits = 8;
+            const int bits = 8;
             struct pl_color_transform trans;
-            trans = pl_get_yuv2rgb_matrix(pl_color_unknown,
-                                          pl_color_adjustment_neutral,
-                                          ibits, obits, PL_COLOR_LEVELS_UNKNOWN);
+            trans = pl_get_decoding_matrix(pl_color_repr_unknown,
+                                           pl_color_adjustment_neutral,
+                                           PL_COLOR_LEVELS_UNKNOWN, bits);
 
             char *s = talloc_strdup(sh, "");
             s = talloc_asprintf_append(s, "palette: ");
@@ -105,7 +105,7 @@ static void add_dvd_streams(demuxer_t *demuxer)
                 int color = info.palette[i];
                 int y[3] = {(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff};
                 int c[3];
-                mp_map_fixp_color(ibits, y, obits, c, trans);
+                mp_map_fixp_color(bits, y, bits, c, trans);
                 color = (c[2] << 16) | (c[1] << 8) | c[0];
 
                 if (i != 0)

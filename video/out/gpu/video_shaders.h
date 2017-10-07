@@ -43,7 +43,7 @@ void pass_ootf(struct gl_shader_cache *sc, enum pl_color_light light, float peak
 void pass_inverse_ootf(struct gl_shader_cache *sc, enum pl_color_light light, float peak);
 
 void pass_color_map(struct gl_shader_cache *sc,
-                    struct pl_color src, struct pl_color dst,
+                    struct pl_color_space src, struct pl_color_space dst,
                     enum tone_mapping algo, float tone_mapping_param,
                     float tone_mapping_desat, bool use_detected_peak,
                     bool gamut_warning, bool is_linear);

@@ -114,10 +114,10 @@ double encode_lavc_getoffset(struct encode_lavc_context *ctx,
 void encode_lavc_fail(struct encode_lavc_context *ctx, const char *format, ...); // report failure of encoding
 
 bool encode_lavc_set_csp(struct encode_lavc_context *ctx,
-                         AVCodecContext *codec, enum pl_color_space csp);
+                         AVCodecContext *codec, enum pl_color_system csp);
 bool encode_lavc_set_csp_levels(struct encode_lavc_context *ctx,
                                 AVCodecContext *codec, enum pl_color_levels lev);
-enum pl_color_space encode_lavc_get_csp(struct encode_lavc_context *ctx,
+enum pl_color_system encode_lavc_get_csp(struct encode_lavc_context *ctx,
                                         AVCodecContext *codec);
 enum pl_color_levels encode_lavc_get_csp_levels(struct encode_lavc_context *ctx,
                                                 AVCodecContext *codec);

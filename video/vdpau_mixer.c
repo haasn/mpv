@@ -196,12 +196,12 @@ static int create_vdp_mixer(struct mp_vdpau_mixer *mixer,
     struct pl_color_transform yuv2rgb;
     VdpCSCMatrix matrix;
 
-    struct pl_color csp = mp_csp_from_image_params(&mixer->image_params);
+    struct pl_color_repr csp = mp_csp_from_image_params(&mixer->image_params);
     struct pl_color_adjustment cparams = pl_color_adjustment_neutral;
     enum pl_color_levels levels;
     if (mixer->video_eq)
         mp_csp_equalizer_state_get(mixer->video_eq, &cparams, &levels);
-    yuv2rgb = pl_get_yuv2rgb_matrix(csp, cparams, 8, 8, levels);
+    yuv2rgb = pl_get_decoding_matrix(csp, cparams, levels, 0);
 
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < 3; c++)

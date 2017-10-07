@@ -679,7 +679,7 @@ static void pass_tone_map(struct gl_shader_cache *sc, float ref_peak,
 // the caller to have already bound the appropriate SSBO and set up the
 // compute shader metadata
 void pass_color_map(struct gl_shader_cache *sc,
-                    struct pl_color src, struct pl_color dst,
+                    struct pl_color_space src, struct pl_color_space dst,
                     enum tone_mapping algo, float tone_mapping_param,
                     float tone_mapping_desat, bool detect_peak,
                     bool gamut_warning, bool is_linear)
@@ -729,8 +729,8 @@ void pass_color_map(struct gl_shader_cache *sc,
         struct pl_raw_primaries csp_src = pl_raw_primaries_get(src.primaries),
                                 csp_dst = pl_raw_primaries_get(dst.primaries);
         struct pl_color_matrix cms_matrix;
-        cms_matrix = pl_get_rgb2rgb_matrix(csp_src, csp_dst,
-                                           PL_INTENT_RELATIVE_COLORIMETRIC);
+        cms_matrix = pl_get_color_mapping_matrix(csp_src, csp_dst,
+                                                 PL_INTENT_RELATIVE_COLORIMETRIC);
         gl_sc_uniform_mat3(sc, "cms_matrix", true, &cms_matrix.m[0][0]);
         GLSL(color.rgb = cms_matrix * color.rgb;)
         // Since this can reduce the gamut, figure out by how much

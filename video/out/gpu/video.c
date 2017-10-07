@@ -530,9 +530,9 @@ bool gl_video_gamma_auto_enabled(struct gl_video *p)
     return p->opts.gamma_auto;
 }
 
-struct pl_color gl_video_get_output_colorspace(struct gl_video *p)
+struct pl_color_space gl_video_get_output_colorspace(struct gl_video *p)
 {
-    return (struct pl_color) {
+    return (struct pl_color_space) {
         .primaries = p->opts.target_prim,
         .transfer = p->opts.target_trc,
     };
@@ -702,13 +702,12 @@ static void pass_get_images(struct gl_video *p, struct video_image *vimg,
         chroma.t[1] = ls_h < 1 ? ls_h * -cy / 2 : 0;
     }
 
-    int msb_valid_bits =
-        p->ra_format.component_bits + MPMIN(p->ra_format.component_pad, 0);
+    struct pl_color_repr repr = p->image_params.color_repr;
+    repr.bit_depth = p->ra_format.component_bits + MPMIN(p->ra_format.component_pad, 0);
+
     // The existing code assumes we just have a single tex multiplier for
     // all of the planes. This may change in the future
-    float tex_mul = 1.0 / pl_color_space_texture_mul(p->image_params.color.space,
-                                                     msb_valid_bits,
-                                                     p->ra_format.component_bits);
+    float tex_mul = 1.0 / pl_color_repr_texture_mul(repr, p->ra_format.component_bits);
 
     memset(img, 0, 4 * sizeof(img[0]));
     for (int n = 0; n < p->plane_count; n++) {
@@ -722,9 +721,9 @@ static void pass_get_images(struct gl_video *p, struct video_image *vimg,
                 ctype = PLANE_NONE;
             } else if (c == 4) {
                 ctype = PLANE_ALPHA;
-            } else if (p->image_params.color.space == PL_COLOR_SPACE_RGB) {
+            } else if (p->image_params.color_repr.sys == PL_COLOR_SYSTEM_RGB) {
                 ctype = PLANE_RGB;
-            } else if (p->image_params.color.space == PL_COLOR_SPACE_XYZ) {
+            } else if (p->image_params.color_repr.sys == PL_COLOR_SYSTEM_XYZ) {
                 ctype = PLANE_XYZ;
             } else {
                 ctype = c == 1 ? PLANE_LUMA : PLANE_CHROMA;
@@ -1822,7 +1821,7 @@ static void deband_hook(struct gl_video *p, struct image img,
 {
     pass_describe(p, "debanding (%s)", plane_names[img.type]);
     pass_sample_deband(p->sc, p->opts.deband_opts, &p->lfg,
-                       p->image_params.color.transfer);
+                       p->image_params.color_space.transfer);
 }
 
 static void unsharp_hook(struct gl_video *p, struct image img,
@@ -2191,7 +2190,7 @@ static void pass_convert_yuv(struct gl_video *p)
     struct gl_shader_cache *sc = p->sc;
     pass_describe(p, "color conversion");
 
-    struct pl_color csp = mp_csp_from_image_params(&p->image_params);
+    struct pl_color_repr csp = mp_csp_from_image_params(&p->image_params);
     struct pl_color_adjustment cparams = pl_color_adjustment_neutral;
     enum pl_color_levels levels;
     mp_csp_equalizer_state_get(p->video_eq, &cparams, &levels);
@@ -2204,20 +2203,20 @@ static void pass_convert_yuv(struct gl_video *p)
         GLSLF("color = color.%s;\n", p->color_swizzle);
 
     // Pre-colormatrix input gamma correction
-    if (p->image_params.color.space == PL_COLOR_SPACE_XYZ)
+    if (p->image_params.color_repr.sys == PL_COLOR_SYSTEM_XYZ)
         GLSL(color.rgb = pow(color.rgb, vec3(2.6));) // linear light
 
     // Conversion to RGB. For RGB itself, this still applies e.g. brightness
     // and contrast controls. We always pick 0 as the bit depth because we
     // apply the texture multiplier elsewhere (in pass_read_video).
     struct pl_color_transform t;
-    t = pl_get_yuv2rgb_matrix(csp, cparams, 0, 0, levels);
+    t = pl_get_decoding_matrix(csp, cparams, levels, 0);
     gl_sc_uniform_mat3(sc, "colormatrix", true, &t.mat.m[0][0]);
     gl_sc_uniform_vec3(sc, "colormatrix_c", t.c);
 
     GLSL(color.rgb = mat3(colormatrix) * color.rgb + colormatrix_c;)
 
-    if (p->image_params.color.space == PL_COLOR_SPACE_BT_2020_C) {
+    if (p->image_params.color_repr.sys == PL_COLOR_SYSTEM_BT_2020_C) {
         // Conversion for C'rcY'cC'bc via the BT.2020 CL system:
         // C'bc = (B'-Y'c) / 1.9404  | C'bc <= 0
         //      = (B'-Y'c) / 1.5816  | C'bc >  0
@@ -2331,12 +2330,12 @@ static void pass_scale_main(struct gl_video *p)
     // Linear light downscaling results in nasty artifacts for HDR curves due
     // to the potentially extreme brightness differences severely compounding
     // any ringing. So just scale in gamma light instead.
-    if (pl_color_transfer_is_hdr(p->image_params.color.transfer) && downscaling)
+    if (pl_color_transfer_is_hdr(p->image_params.color_space.transfer) && downscaling)
         use_linear = false;
 
     if (use_linear) {
         p->use_linear = true;
-        pass_linearize(p->sc, p->image_params.color.transfer);
+        pass_linearize(p->sc, p->image_params.color_space.transfer);
         pass_opt_hook_point(p, "LINEAR", NULL);
     }
 
@@ -2387,13 +2386,14 @@ static void pass_scale_main(struct gl_video *p)
 // rendering)
 // If OSD is true, ignore any changes that may have been made to the video
 // by previous passes (i.e. linear scaling)
-static void pass_colormanage(struct gl_video *p, struct pl_color src, bool osd)
+static void pass_colormanage(struct gl_video *p, struct pl_color_space src,
+                             bool osd)
 {
     struct ra *ra = p->ra;
 
     // Figure out the target color space from the options, or auto-guess if
     // none were set
-    struct pl_color dst = {
+    struct pl_color_space dst = {
         .transfer = p->opts.target_trc,
         .primaries = p->opts.target_prim,
         .light = PL_COLOR_LIGHT_DISPLAY,
@@ -2403,8 +2403,8 @@ static void pass_colormanage(struct gl_video *p, struct pl_color src, bool osd)
         // The 3DLUT is always generated against the video's original source
         // space, *not* the reference space. (To avoid having to regenerate
         // the 3DLUT for the OSD on every frame)
-        enum pl_color_primaries prim_orig = p->image_params.color.primaries;
-        enum pl_color_transfer trc_orig = p->image_params.color.transfer;
+        enum pl_color_primaries prim_orig = p->image_params.color_space.primaries;
+        enum pl_color_transfer trc_orig = p->image_params.color_space.transfer;
 
         // One exception: HDR is not implemented by LittleCMS for technical
         // limitation reasons, so we use a gamma 2.2 input curve here instead.
@@ -2461,7 +2461,7 @@ static void pass_colormanage(struct gl_video *p, struct pl_color src, bool osd)
         } peak_ssbo = {0};
 
         // Prefill with safe values
-        int safe = pl_color_transfer_nominal_peak(p->image_params.color.transfer)
+        int safe = pl_color_transfer_nominal_peak(p->image_params.color_space.transfer)
                    * PL_COLOR_REF_WHITE;
         peak_ssbo.sig_peak_raw = PEAK_DETECT_FRAMES * safe;
         for (int i = 0; i < PEAK_DETECT_FRAMES+1; i++)
@@ -2628,15 +2628,8 @@ static void pass_draw_osd(struct gl_video *p, int draw_flags, double pts,
             continue;
         // When subtitles need to be color managed, assume they're in sRGB
         // (for lack of anything saner to do)
-        if (cms) {
-            static const struct pl_color csp_srgb = {
-                .primaries = PL_COLOR_PRIM_BT_709,
-                .transfer = PL_COLOR_TRC_SRGB,
-                .light = PL_COLOR_LIGHT_DISPLAY,
-            };
-
-            pass_colormanage(p, csp_srgb, true);
-        }
+        if (cms)
+            pass_colormanage(p, pl_color_space_srgb, true);
         mpgl_osd_draw_finish(p->osd, n, p->sc, fbo);
     }
 
@@ -2753,7 +2746,7 @@ static bool pass_render_frame(struct gl_video *p, struct mp_image *mpi, uint64_t
         rect.mt *= scale[1]; rect.mb *= scale[1];
         // We should always blend subtitles in non-linear light
         if (p->use_linear) {
-            pass_delinearize(p->sc, p->image_params.color.transfer);
+            pass_delinearize(p->sc, p->image_params.color_space.transfer);
             p->use_linear = false;
         }
         finish_pass_tex(p, &p->blend_subs_tex, p->texture_w, p->texture_h);
@@ -2780,7 +2773,7 @@ static void pass_draw_to_screen(struct gl_video *p, struct ra_fbo fbo)
         GLSL(color.rgb = pow(color.rgb, vec3(user_gamma));)
     }
 
-    pass_colormanage(p, p->image_params.color, false);
+    pass_colormanage(p, p->image_params.color_space, false);
 
     // Since finish_pass_fbo doesn't work with compute shaders, and neither
     // does the checkerboard/dither code, we may need an indirection via
@@ -2831,7 +2824,7 @@ static bool update_surface(struct gl_video *p, struct mp_image *mpi,
     // because mixing in compressed light artificially darkens the results
     if (!p->use_linear) {
         p->use_linear = true;
-        pass_linearize(p->sc, p->image_params.color.transfer);
+        pass_linearize(p->sc, p->image_params.color_space.transfer);
     }
 
     finish_pass_tex(p, &surf->tex, vp_w, vp_h);

@@ -99,7 +99,7 @@ struct mp_imgfmt_desc mp_imgfmt_get_desc(int imgfmt);
 
 // PL_COLOR_AUTO for YUV, PL_COLOR_RGB or PL_COLOR_XYZ otherwise.
 // (Because IMGFMT/AV_PIX_FMT conflate format and csp for RGB and XYZ.)
-enum pl_color_space mp_imgfmt_get_forced_csp(int imgfmt);
+enum pl_color_system mp_imgfmt_get_forced_csp(int imgfmt);
 
 enum mp_component_type {
     MP_COMPONENT_TYPE_UNKNOWN = 0,
