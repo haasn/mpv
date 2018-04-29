@@ -313,7 +313,7 @@ struct ra_tex_vk {
     // for rendering
     VkFramebuffer framebuffer;
     VkRenderPass dummyPass;
-    // for uploading
+    // for uploading / downloading
     struct ra_buf_pool pbo;
     // "current" metadata, can change during the course of execution
     VkImageLayout current_layout;
@@ -536,13 +536,13 @@ static struct ra_tex *vk_tex_create(struct ra *ra,
         usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (params->storage_dst)
         usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-    if (params->blit_src)
+    if (params->downloadable || params->blit_src)
         usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if (params->host_mutable || params->blit_dst || params->initial_data)
         usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
     // Always use the transfer pool if available, for efficiency
-    if (params->host_mutable && vk->pool_transfer)
+    if ((params->host_mutable || params->downloadable) && vk->pool_transfer)
         tex_vk->upload_queue = TRANSFER;
 
     // Double-check image usage support and fail immediately if invalid
@@ -663,6 +663,8 @@ struct ra_tex *ra_vk_wrap_swapchain_img(struct ra *ra, VkImage vkimg,
         .render_src  = !!(info.imageUsage & VK_IMAGE_USAGE_SAMPLED_BIT),
         .render_dst  = !!(info.imageUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT),
         .storage_dst = !!(info.imageUsage & VK_IMAGE_USAGE_STORAGE_BIT),
+        .host_mutable = !!(info.imageUsage & VK_IMAGE_USAGE_TRANSFER_DST_BIT),
+        .downloadable = !!(info.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT),
     };
 
     struct ra_tex_vk *tex_vk = tex->priv = talloc_zero(tex, struct ra_tex_vk);
@@ -707,7 +709,8 @@ static void vk_buf_deref(struct ra *ra, struct ra_buf *buf)
 
 static void buf_barrier(struct ra *ra, struct vk_cmd *cmd, struct ra_buf *buf,
                         VkPipelineStageFlags newStage,
-                        VkAccessFlags newAccess, int offset, size_t size)
+                        VkAccessFlags newAccess, int offset, size_t size,
+                        bool visible_writes)
 {
     struct ra_buf_vk *buf_vk = buf->priv;
 
@@ -726,6 +729,11 @@ static void buf_barrier(struct ra *ra, struct vk_cmd *cmd, struct ra_buf *buf,
         buffBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
         buf_vk->current_stage = VK_PIPELINE_STAGE_HOST_BIT;
         buf_vk->needsflush = false;
+    }
+
+    if (visible_writes && buf_vk->slice.data) {
+        buffBarrier.dstAccessMask |= VK_ACCESS_HOST_READ_BIT;
+        newStage |= VK_PIPELINE_STAGE_HOST_BIT;
     }
 
     if (buffBarrier.srcAccessMask != buffBarrier.dstAccessMask) {
@@ -763,7 +771,7 @@ static void vk_buf_update(struct ra *ra, struct ra_buf *buf, ptrdiff_t offset,
         }
 
         buf_barrier(ra, cmd, buf, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK_ACCESS_TRANSFER_WRITE_BIT, offset, size);
+                    VK_ACCESS_TRANSFER_WRITE_BIT, offset, size, false);
 
         VkDeviceSize bufOffset = buf_vk->slice.mem.offset + offset;
         assert(bufOffset == MP_ALIGN_UP(bufOffset, 4));
@@ -897,7 +905,7 @@ static bool vk_tex_upload(struct ra *ra,
         goto error;
 
     buf_barrier(ra, cmd, buf, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_ACCESS_TRANSFER_READ_BIT, region.bufferOffset, size);
+                VK_ACCESS_TRANSFER_READ_BIT, region.bufferOffset, size, false);
 
     tex_barrier(ra, cmd, tex, VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -909,6 +917,71 @@ static bool vk_tex_upload(struct ra *ra,
 
     tex_signal(ra, cmd, tex, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
+    return true;
+
+error:
+    return false;
+}
+
+static bool vk_tex_download(struct ra *ra,
+                            struct ra_tex_download_params *params)
+{
+    struct mpvk_ctx *vk = ra_vk_get(ra);
+    struct ra_tex *tex = params->tex;
+    struct ra_tex_vk *tex_vk = tex->priv;
+
+    uint64_t size = params->stride * tex->params.h;
+    struct ra_buf_params bufparams = {
+        .type = RA_BUF_TYPE_TEX_UPLOAD,
+        .size = size,
+        .host_mutable = true, // same requirements for vulkan
+    };
+
+    struct ra_buf *buf = ra_buf_pool_get(ra, &tex_vk->pbo, &bufparams);
+    if (!buf)
+        return false;
+
+    struct ra_buf_vk *buf_vk = buf->priv;
+    int pix_size = tex->params.format->pixel_size;
+
+    VkBufferImageCopy region = {
+        .bufferOffset = buf_vk->slice.mem.offset,
+        .bufferRowLength = params->stride / pix_size,
+        .bufferImageHeight = tex->params.h,
+        .imageSubresource = vk_layers,
+        .imageExtent = (VkExtent3D){tex->params.w, tex->params.h, 1},
+    };
+
+    if (region.bufferRowLength * pix_size != params->stride) {
+        MP_ERR(ra, "Texture upload strides must be a multiple of the texel "
+                   "size!\n");
+        goto error;
+    }
+
+    struct vk_cmd *cmd = vk_require_cmd(ra, tex_vk->upload_queue);
+    if (!cmd)
+        goto error;
+
+    buf_barrier(ra, cmd, buf, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_ACCESS_TRANSFER_WRITE_BIT, region.bufferOffset, size, true);
+
+    tex_barrier(ra, cmd, tex, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, false);
+
+    vkCmdCopyImageToBuffer(cmd->buf, tex_vk->img, tex_vk->current_layout,
+                           buf_vk->slice.buf, 1, &region);
+
+    tex_signal(ra, cmd, tex, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    // Slow ugly blocking code
+    vk_submit(ra);
+    mpvk_flush_commands(vk);
+    while (!vk_buf_poll(ra, buf))
+        mpvk_poll_commands(vk, 1000000); // 1ms
+
+    assert(buf_vk->slice.data);
+    memcpy(params->dst, buf_vk->slice.data, size);
     return true;
 
 error:
@@ -1495,7 +1568,7 @@ static void vk_update_descriptor(struct ra *ra, struct vk_cmd *cmd,
             access |= VK_ACCESS_SHADER_WRITE_BIT;
 
         buf_barrier(ra, cmd, buf, passStages[pass->params.type],
-                    access, buf_vk->slice.mem.offset, buf->params.size);
+                    access, buf_vk->slice.mem.offset, buf->params.size, false);
 
         VkDescriptorBufferInfo *binfo = &pass_vk->dsbinfo[idx];
         *binfo = (VkDescriptorBufferInfo) {
@@ -1598,7 +1671,7 @@ static void vk_renderpass_run(struct ra *ra,
 
         buf_barrier(ra, cmd, buf, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
                     VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
-                    buf_vk->slice.mem.offset, buf_params.size);
+                    buf_vk->slice.mem.offset, buf_params.size, false);
 
         vkCmdBindVertexBuffers(cmd->buf, 0, 1, &buf_vk->slice.buf,
                                &buf_vk->slice.mem.offset);
@@ -1864,6 +1937,7 @@ static struct ra_fns ra_fns_vk = {
     .tex_create             = vk_tex_create,
     .tex_destroy            = vk_tex_destroy_lazy,
     .tex_upload             = vk_tex_upload,
+    .tex_download           = vk_tex_download,
     .buf_create             = vk_buf_create,
     .buf_destroy            = vk_buf_destroy_lazy,
     .buf_update             = vk_buf_update,

@@ -3212,7 +3212,9 @@ void gl_video_screenshot(struct gl_video *p, struct vo_frame *frame,
         .downloadable = true,
         .w = p->osd_rect.w,
         .h = p->osd_rect.h,
+        .d = 1,
         .render_dst = true,
+        .blit_dst = true,
     };
 
     params.format = ra_find_unorm_format(p->ra, 1, 4);
