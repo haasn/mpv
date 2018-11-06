@@ -83,6 +83,9 @@ struct ra_swapchain_fns {
     // Performs a buffer swap. This blocks for as long as necessary to meet
     // params.swapchain_depth, or until the next vblank (for vsynced contexts)
     void (*swap_buffers)(struct ra_swapchain *sw);
+
+    // See vo. Usually called after swap_buffers().
+    void (*get_vsync)(struct ra_swapchain *sw, struct vo_vsync_info *info);
 };
 
 // Create and destroy a ra_ctx. This also takes care of creating and destroying

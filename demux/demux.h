@@ -56,6 +56,7 @@ struct demux_ctrl_reader_state {
     double seeking; // current low level seek target, or NOPTS
     int low_level_seeks; // number of started low level seeks
     double ts_last; // approx. timestamp of demuxer position
+    uint64_t bytes_per_second; // low level statistics
     // Positions that can be seeked to without incurring the latency of a low
     // level seek.
     int num_seek_ranges;
@@ -174,12 +175,12 @@ struct demuxer_params {
     bool *matroska_was_valid;
     struct timeline *timeline;
     bool disable_timeline;
-    bool initial_readahead;
     bstr init_fragment;
     bool skip_lavf_probing;
+    bool does_not_own_stream; // if false, stream is free'd on demux_free()
+    bool stream_record; // if true, enable stream recording if option is set
     // -- demux_open_url() only
     int stream_flags;
-    bool disable_cache;
     // result
     bool demuxer_failed;
 };
@@ -202,6 +203,7 @@ typedef struct demuxer {
     bool fully_read;
     bool is_network; // opened directly from a network stream
     bool access_references; // allow opening other files/URLs
+    bool extended_ctrls; // supports some of BD/DVD/DVB/TV controls
 
     // Bitmask of DEMUX_EVENT_*
     int events;
@@ -230,8 +232,12 @@ typedef struct demuxer {
 
     // internal to demux.c
     struct demux_internal *in;
-    struct mp_tags **update_stream_tags;
-    int num_update_stream_tags;
+
+    // Triggered when ending demuxing forcefully. Usually bound to the stream too.
+    struct mp_cancel *cancel;
+
+    // Demuxer thread only.
+    uint64_t total_unbuffered_read_bytes;
 
     // Since the demuxer can run in its own thread, and the stream is not
     // thread-safe, only the demuxer is allowed to access the stream directly.
@@ -245,8 +251,13 @@ typedef struct {
     int aid, vid, sid; //audio, video and subtitle id
 } demux_program_t;
 
-void free_demuxer(struct demuxer *demuxer);
-void free_demuxer_and_stream(struct demuxer *demuxer);
+void demux_free(struct demuxer *demuxer);
+void demux_cancel_and_free(struct demuxer *demuxer);
+
+struct demux_free_async_state;
+struct demux_free_async_state *demux_free_async(struct demuxer *demuxer);
+void demux_free_async_force(struct demux_free_async_state *state);
+bool demux_free_async_finish(struct demux_free_async_state *state);
 
 void demux_add_packet(struct sh_stream *stream, demux_packet_t *dp);
 void demuxer_feed_caption(struct sh_stream *stream, demux_packet_t *dp);
@@ -307,6 +318,7 @@ void demux_metadata_changed(demuxer_t *demuxer);
 void demux_update(demuxer_t *demuxer);
 
 void demux_disable_cache(demuxer_t *demuxer);
+bool demux_is_network_cached(demuxer_t *demuxer);
 
 struct sh_stream *demuxer_stream_by_demuxer_id(struct demuxer *d,
                                                enum stream_type t, int id);

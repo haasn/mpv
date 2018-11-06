@@ -300,11 +300,9 @@ static struct vo *vo_create(bool probing, struct mpv_global *global,
     m_config_cache_set_dispatch_change_cb(vo->opts_cache, vo->in->dispatch,
                                           update_opts, vo);
 
-#if HAVE_GL
     vo->gl_opts_cache = m_config_cache_alloc(NULL, global, &gl_video_conf);
     m_config_cache_set_dispatch_change_cb(vo->gl_opts_cache, vo->in->dispatch,
                                           update_opts, vo);
-#endif
 
     vo->eq_opts_cache = m_config_cache_alloc(NULL, global, &mp_csp_equalizer_conf);
     m_config_cache_set_dispatch_change_cb(vo->eq_opts_cache, vo->in->dispatch,
@@ -332,7 +330,9 @@ error:
 
 struct vo *init_best_video_out(struct mpv_global *global, struct vo_extra *ex)
 {
-    struct m_obj_settings *vo_list = global->opts->vo->video_driver_list;
+    struct mp_vo_opts *opts = mp_get_config_group(NULL, global, &vo_sub_opts);
+    struct m_obj_settings *vo_list = opts->video_driver_list;
+    struct vo *vo = NULL;
     // first try the preferred drivers, with their optional subdevice param:
     if (vo_list && vo_list[0].name) {
         for (int n = 0; vo_list[n].name; n++) {
@@ -340,11 +340,11 @@ struct vo *init_best_video_out(struct mpv_global *global, struct vo_extra *ex)
             if (strlen(vo_list[n].name) == 0)
                 goto autoprobe;
             bool p = !!vo_list[n + 1].name;
-            struct vo *vo = vo_create(p, global, ex, vo_list[n].name);
+            vo = vo_create(p, global, ex, vo_list[n].name);
             if (vo)
-                return vo;
+                goto done;
         }
-        return NULL;
+        goto done;
     }
 autoprobe:
     // now try the rest...
@@ -352,11 +352,13 @@ autoprobe:
         const struct vo_driver *driver = video_out_drivers[i];
         if (driver == &video_out_null)
             break;
-        struct vo *vo = vo_create(true, global, ex, (char *)driver->name);
+        vo = vo_create(true, global, ex, (char *)driver->name);
         if (vo)
-            return vo;
+            goto done;
     }
-    return NULL;
+done:
+    talloc_free(opts);
+    return vo;
 }
 
 static void terminate_vo(void *p)
@@ -472,14 +474,14 @@ static void vsync_skip_detection(struct vo *vo)
 }
 
 // Always called locked.
-static void update_vsync_timing_after_swap(struct vo *vo)
+static void update_vsync_timing_after_swap(struct vo *vo,
+                                           struct vo_vsync_info *vsync)
 {
     struct vo_internal *in = vo->in;
 
-    int64_t now = mp_time_us();
+    int64_t vsync_time = vsync->last_queue_display_time;
     int64_t prev_vsync = in->prev_vsync;
-
-    in->prev_vsync = now;
+    in->prev_vsync = vsync_time;
 
     if (!in->expecting_vsync) {
         reset_vsync_timings(vo);
@@ -493,13 +495,13 @@ static void update_vsync_timing_after_swap(struct vo *vo)
     if (in->num_vsync_samples >= MAX_VSYNC_SAMPLES)
         in->num_vsync_samples -= 1;
     MP_TARRAY_INSERT_AT(in, in->vsync_samples, in->num_vsync_samples, 0,
-                        now - prev_vsync);
+                        vsync_time - prev_vsync);
     in->drop_point = MPMIN(in->drop_point + 1, in->num_vsync_samples);
     in->num_total_vsync_samples += 1;
     if (in->base_vsync) {
         in->base_vsync += in->vsync_interval;
     } else {
-        in->base_vsync = now;
+        in->base_vsync = vsync_time;
     }
 
     double avg = 0;
@@ -908,13 +910,24 @@ bool vo_render_frame_external(struct vo *vo)
 
         vo->driver->flip_page(vo);
 
+        struct vo_vsync_info vsync = {
+            .last_queue_display_time = -1,
+            .skipped_vsyncs = -1,
+        };
+        if (vo->driver->get_vsync)
+            vo->driver->get_vsync(vo, &vsync);
+
+        // Make up some crap if presentation feedback is missing.
+        if (vsync.last_queue_display_time < 0)
+            vsync.last_queue_display_time = mp_time_us();
+
         MP_STATS(vo, "end video-flip");
 
         pthread_mutex_lock(&in->lock);
         in->dropped_frame = prev_drop_count < vo->in->drop_count;
         in->rendering = false;
 
-        update_vsync_timing_after_swap(vo);
+        update_vsync_timing_after_swap(vo, &vsync);
     }
 
     if (vo->driver->caps & VO_CAP_NORETAIN) {

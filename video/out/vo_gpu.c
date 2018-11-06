@@ -98,6 +98,14 @@ static void flip_page(struct vo *vo)
     sw->fns->swap_buffers(sw);
 }
 
+static void get_vsync(struct vo *vo, struct vo_vsync_info *info)
+{
+    struct gpu_priv *p = vo->priv;
+    struct ra_swapchain *sw = p->ctx->swapchain;
+    if (sw->fns->get_vsync)
+        sw->fns->get_vsync(sw, info);
+}
+
 static int query_format(struct vo *vo, int format)
 {
     struct gpu_priv *p = vo->priv;
@@ -326,6 +334,7 @@ const struct vo_driver video_out_gpu = {
     .get_image = get_image,
     .draw_frame = draw_frame,
     .flip_page = flip_page,
+    .get_vsync = get_vsync,
     .wait_events = wait_events,
     .wakeup = wakeup,
     .uninit = uninit,
