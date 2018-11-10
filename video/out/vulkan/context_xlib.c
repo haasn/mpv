@@ -41,8 +41,7 @@ static bool xlib_init(struct ra_ctx *ctx)
     struct mpvk_ctx *vk = &p->vk;
     int msgl = ctx->opts.probing ? MSGL_V : MSGL_ERR;
 
-    if (!mpvk_instance_init(vk, ctx->log, VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
-                            ctx->opts.debug))
+    if (!mpvk_init(vk, ctx, VK_KHR_XLIB_SURFACE_EXTENSION_NAME))
         goto error;
 
     if (!vo_x11_init(ctx->vo))
@@ -57,10 +56,10 @@ static bool xlib_init(struct ra_ctx *ctx)
          .window = ctx->vo->x11->window,
     };
 
-    VkResult res = vkCreateXlibSurfaceKHR(vk->inst, &xinfo, MPVK_ALLOCATOR,
-                                          &vk->surf);
+    VkInstance inst = vk->vkinst->instance;
+    VkResult res = vkCreateXlibSurfaceKHR(inst, &xinfo, NULL, &vk->surface);
     if (res != VK_SUCCESS) {
-        MP_MSG(ctx, msgl, "Failed creating Xlib surface: %s\n", vk_err(res));
+        MP_MSG(ctx, msgl, "Failed creating Xlib surface\n");
         goto error;
     }
 
@@ -74,25 +73,15 @@ error:
     return false;
 }
 
-static bool resize(struct ra_ctx *ctx)
-{
-    return ra_vk_ctx_resize(ctx->swapchain, ctx->vo->dwidth, ctx->vo->dheight);
-}
-
 static bool xlib_reconfig(struct ra_ctx *ctx)
 {
     vo_x11_config_vo_window(ctx->vo);
-    return resize(ctx);
+    return true;
 }
 
 static int xlib_control(struct ra_ctx *ctx, int *events, int request, void *arg)
 {
-    int ret = vo_x11_control(ctx->vo, events, request, arg);
-    if (*events & VO_EVENT_RESIZE) {
-        if (!resize(ctx))
-            return VO_ERROR;
-    }
-    return ret;
+    return vo_x11_control(ctx->vo, events, request, arg);
 }
 
 static void xlib_wakeup(struct ra_ctx *ctx)
