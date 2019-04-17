@@ -1092,7 +1092,7 @@ Video
     You can get the list of allowed codecs with ``mpv --vd=help``. Remove the
     prefix, e.g. instead of ``lavc:h264`` use ``h264``.
 
-    By default, this is set to ``h264,vc1,wmv3,hevc,mpeg2video,vp9``. Note that
+    By default, this is set to ``h264,vc1,hevc,vp9``. Note that
     the hardware acceleration special codecs like ``h264_vdpau`` are not
     relevant anymore, and in fact have been removed from Libav in this form.
 
@@ -4842,17 +4842,74 @@ The following video options are currently all specific to ``--vo=gpu`` and
 
     OS X only.
 
-``--macos-title-bar-style=<dark|ultradark|light|mediumlight|auto>``
-    Sets the styling of the title bar (default: dark).
-    OS X and cocoa-cb only
+``--macos-title-bar-appearance=<appearance>``
+    Sets the appearance of the title bar (default: auto). Not all combinations
+    of appearances and ``--macos-title-bar-material`` materials make sense or
+    are unique. Appearances that are not supported by you current macOS version
+    fall back to the default value.
+    macOS and cocoa-cb only
 
-    :dark:        Dark title bar with vibrancy, a subtle blurring effect that
-                  dynamically blends the background (Video) into the title bar.
-    :ultradark:   Darker title bar with vibrancy (like QuickTime Player).
-    :light:       Bright title bar with vibrancy.
-    :mediumlight: Less bright title bar with vibrancy.
-    :auto:        Detects the system settings and sets the title bar styling
-                  appropriately, either ultradark or mediumlight.
+    ``<appearance>`` can be one of the following:
+
+    :auto:                     Detects the system settings and sets the title
+                               bar appearance appropriately. On macOS 10.14 it
+                               also detects run time changes.
+    :aqua:                     The standard macOS Light appearance.
+    :darkAqua:                 The standard macOS Dark appearance. (macOS 10.14+)
+    :vibrantLight:             Light vibrancy appearance with.
+    :vibrantDark:              Dark vibrancy appearance with.
+    :aquaHighContrast:         Light Accessibility appearance. (macOS 10.14+)
+    :darkAquaHighContrast:     Dark Accessibility appearance. (macOS 10.14+)
+    :vibrantLightHighContrast: Light vibrancy Accessibility appearance.
+                               (macOS 10.14+)
+    :vibrantDarkHighContrast:  Dark vibrancy Accessibility appearance.
+                               (macOS 10.14+)
+
+``--macos-title-bar-material=<material>``
+    Sets the material of the title bar (default: titlebar). All deprecated
+    materials should not be used on macOS 10.14+ because their functionality
+    is not guaranteed. Not all combinations of materials and
+    ``--macos-title-bar-appearance`` appearances make sense or are unique.
+    Materials that are not supported by you current macOS version fall back to
+    the default value.
+    macOS and cocoa-cb only
+
+    ``<material>`` can be one of the following:
+
+    :titlebar:              The standard macOS titel bar material.
+    :selection:             The standard macOS selection material.
+    :menu:                  The standard macOS menu material. (macOS 10.11+)
+    :popover:               The standard macOS popover material. (macOS 10.11+)
+    :sidebar:               The standard macOS sidebar material. (macOS 10.11+)
+    :headerView:            The standard macOS header view material.
+                            (macOS 10.14+)
+    :sheet:                 The standard macOS sheet material. (macOS 10.14+)
+    :windowBackground:      The standard macOS window background material.
+                            (macOS 10.14+)
+    :hudWindow:             The standard macOS hudWindow material. (macOS 10.14+)
+    :fullScreen:            The standard macOS full screen material.
+                            (macOS 10.14+)
+    :toolTip:               The standard macOS tool tip material. (macOS 10.14+)
+    :contentBackground:     The standard macOS content background material.
+                            (macOS 10.14+)
+    :underWindowBackground: The standard macOS under window background material.
+                            (macOS 10.14+)
+    :underPageBackground:   The standard macOS under page background material.
+                            (deprecated in macOS 10.14+)
+    :dark:                  The standard macOS dark material.
+                            (deprecated in macOS 10.14+)
+    :light:                 The standard macOS light material.
+                            (macOS 10.14+)
+    :mediumLight:           The standard macOS mediumLight material.
+                            (macOS 10.11+, deprecated in macOS 10.14+)
+    :ultraDark:             The standard macOS ultraDark material.
+                            (macOS 10.11+ deprecated in macOS 10.14+)
+
+``--macos-title-bar-color=<color>``
+    Sets the color of the title bar (default: completely transparent). Is
+    influenced by ``--macos-title-bar-appearance`` and
+    ``--macos-title-bar-material``.
+    See ``--sub-color`` for color syntax.
 
 ``--macos-fs-animation-duration=<default|0-1000>``
     Sets the fullscreen resize animation duration in ms (default: default).
@@ -5212,15 +5269,15 @@ The following video options are currently all specific to ``--vo=gpu`` and
     Apply desaturation for highlights (default: 0.75). The parameter controls
     the strength of the desaturation curve. A value of 0.0 completely disables
     it, while a value of 1.0 means that overly bright colors will tend towards
-    being completely white. (This is not always the case, especially not for
-    highlights that are near primary colors)
+    white. (This is not always the case, especially not for highlights that are
+    near primary colors)
 
     Values in between apply progressively more/less aggressive desaturation.
     This setting helps prevent unnaturally oversaturated colors for
     super-highlights, by (smoothly) turning them into less saturated (per
     channel tone mapped) colors instead. This makes images feel more natural,
     at the cost of chromatic distortions for out-of-range colors. The default
-    value of 0.5 provides a good balance. Setting this to 0.0 preserves the
+    value of 0.75 provides a good balance. Setting this to 0.0 preserves the
     chromatic accuracy of the tone mapping process.
 
 ``--tone-mapping-desaturate-exponent=<0.0..20.0>``
@@ -5288,12 +5345,14 @@ The following video options are currently all specific to ``--vo=gpu`` and
     Size of the 3D LUT generated from the ICC profile in each dimension.
     Default is 64x64x64. Sizes may range from 2 to 512.
 
-``--icc-contrast=<0-1000000>``
+``--icc-contrast=<0-1000000|inf>``
     Specifies an upper limit on the target device's contrast ratio. This is
     detected automatically from the profile if possible, but for some profiles
     it might be missing, causing the contrast to be assumed as infinite. As a
     result, video may appear darker than intended. This only affects BT.1886
-    content. The default of 0 means no limit.
+    content. The default of 0 means no limit if the detected contrast is less
+    than 100000, and limits to 1000 otherwise. Use ``--icc-contrast=inf`` to
+    preserve the infinite contrast (most likely when using OLED displays).
 
 ``--blend-subtitles=<yes|video|no>``
     Blend subtitles directly onto upscaled video frames, before interpolation

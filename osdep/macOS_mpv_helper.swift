@@ -34,6 +34,7 @@ class MPVHelper: NSObject {
     var mpvLog: OpaquePointer?
     var inputContext: OpaquePointer?
     var mpctx: UnsafeMutablePointer<MPContext>?
+    var vo: UnsafeMutablePointer<vo>?
     var macOpts: macos_opts?
     var fbo: GLint = 1
     let deinitLock = NSLock()
@@ -56,6 +57,9 @@ class MPVHelper: NSObject {
         mpv_observe_property(mpvHandle, 0, "border", MPV_FORMAT_FLAG)
         mpv_observe_property(mpvHandle, 0, "keepaspect-window", MPV_FORMAT_FLAG)
         mpv_observe_property(mpvHandle, 0, "macos-title-bar-style", MPV_FORMAT_STRING)
+        mpv_observe_property(mpvHandle, 0, "macos-title-bar-appearance", MPV_FORMAT_STRING)
+        mpv_observe_property(mpvHandle, 0, "macos-title-bar-material", MPV_FORMAT_STRING)
+        mpv_observe_property(mpvHandle, 0, "macos-title-bar-color", MPV_FORMAT_STRING)
     }
 
     func initRender() {
@@ -127,7 +131,7 @@ class MPVHelper: NSObject {
         return flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) > 0
     }
 
-    func drawRender(_ surface: NSSize, skip: Bool = false) {
+    func drawRender(_ surface: NSSize, _ ctx: CGLContextObj, skip: Bool = false) {
         deinitLock.lock()
         if mpvRenderContext != nil {
             var i: GLint = 0
@@ -153,6 +157,9 @@ class MPVHelper: NSObject {
             glClearColor(0, 0, 0, 1)
             glClear(GLbitfield(GL_COLOR_BUFFER_BIT))
         }
+
+        if !skip { CGLFlushDrawable(ctx) }
+
         deinitLock.unlock()
     }
 

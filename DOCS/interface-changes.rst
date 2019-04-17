@@ -47,6 +47,12 @@ Interface changes
     - support for `--spirv-compiler=nvidia` has been removed, leaving `shaderc`
       as the only option. The `--spirv-compiler` option itself has been marked
       as deprecated, and may be removed in the future.
+    - split up `--tone-mapping-desaturate`` into strength + exponent, instead of
+      only using a single value (which previously just controlled the exponent).
+      The strength now linearly blends between the linear and nonlinear tone
+      mapped versions of a color.
+    - add --hdr-peak-decay-rate and --hdr-scene-threshold-low/high
+    - add --tone-mapping-max-boost
     - ipc: require that "request_id" fields are integers. Other types are still
       accepted for compatibility, but this will stop in the future. Also, if no
       request_id is provided, 0 will be assumed.
@@ -70,17 +76,8 @@ Interface changes
       network streams should not freeze the player core (only playback in
       uncached regions), and differing behavior should be reported as a bug.
       If --demuxer-thread=no is used, there are no guarantees.
-    - split up `--tone-mapping-desaturate`` into strength + exponent, instead of
-      only using a single value (which previously just controlled the exponent).
-      The strength now linearly blends between the linear and nonlinear tone
-      mapped versions of a color.
-    - add --hdr-peak-decay-rate and --hdr-scene-threshold-low/high
-    - add --tone-mapping-max-boost
-    - remove the special-case for the option "video-aspect". When video-aspect
-      is set to "0" or "-1", it will actually return those values, rather than
-      turning this into the effective video aspect with those settings. If
-      you need access to the effective video aspect, you can e.g. divide
-      `video-out-params/dw` by `video-out-params/dh`.
+    - remove `--macos-title-bar-style`, replaced by `--macos-title-bar-material`
+      and `--macos-title-bar-appearance`.
  --- mpv 0.29.0 ---
     - drop --opensles-sample-rate, as --audio-samplerate should be used if desired
     - drop deprecated --videotoolbox-format, --ff-aid, --ff-vid, --ff-sid,

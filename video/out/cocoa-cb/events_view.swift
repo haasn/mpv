@@ -36,7 +36,9 @@ class EventsView: NSView {
         super.init(frame: NSMakeRect(0, 0, 960, 480))
         autoresizingMask = [.viewWidthSizable, .viewHeightSizable]
         wantsBestResolutionOpenGLSurface = true
-        register(forDraggedTypes: [NSFilenamesPboardType, NSURLPboardType])
+        register(forDraggedTypes: [ NSFilenamesPboardType,
+                                    NSURLPboardType,
+                                    NSPasteboardTypeString ])
     }
 
     required init?(coder: NSCoder) {
@@ -60,10 +62,22 @@ class EventsView: NSView {
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard let types = sender.draggingPasteboard().types else { return [] }
-        if types.contains(NSFilenamesPboardType) || types.contains(NSURLPboardType) {
+        if types.contains(NSFilenamesPboardType) ||
+           types.contains(NSURLPboardType) ||
+           types.contains(NSPasteboardTypeString)
+        {
             return .copy
         }
         return []
+    }
+
+    func isURL(_ str: String) -> Bool {
+        let regex = try! NSRegularExpression(pattern: "^(https?|ftp)://[^\\s/$.?#].[^\\s]*$",
+                                             options: .caseInsensitive)
+        let isURL = regex.numberOfMatches(in: str,
+                                     options: [],
+                                       range: NSRange(location: 0, length: str.count))
+        return isURL > 0
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
@@ -75,10 +89,26 @@ class EventsView: NSView {
                 return true
             }
         } else if types.contains(NSURLPboardType) {
-            if let url = pb.propertyList(forType: NSURLPboardType) as? [Any] {
+            if var url = pb.propertyList(forType: NSURLPboardType) as? [String] {
+                url = url.filter{ !$0.isEmpty }
                 EventsResponder.sharedInstance().handleFilesArray(url)
                 return true
             }
+        } else if types.contains(NSPasteboardTypeString) {
+            guard let str = pb.string(forType: NSPasteboardTypeString) else { return false }
+            var filesArray: [String] = []
+
+            for val in str.components(separatedBy: "\n") {
+                let url = val.trimmingCharacters(in: .whitespacesAndNewlines)
+                let path = (url as NSString).expandingTildeInPath
+                if isURL(url) {
+                    filesArray.append(url)
+                } else if path.starts(with: "/") {
+                    filesArray.append(path)
+                }
+            }
+            EventsResponder.sharedInstance().handleFilesArray(filesArray)
+            return true
         }
         return false
     }
@@ -105,14 +135,14 @@ class EventsView: NSView {
         if mpv.getBoolProperty("input-cursor") {
             cocoa_put_key_with_modifiers(SWIFT_KEY_MOUSE_LEAVE, 0)
         }
-        cocoaCB.window.hideTitleBar()
+        cocoaCB.titleBar.hide()
     }
 
     override func mouseMoved(with event: NSEvent) {
         if mpv != nil && mpv.getBoolProperty("input-cursor") {
             signalMouseMovement(event)
         }
-        cocoaCB.window.showTitleBar()
+        cocoaCB.titleBar.show()
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -230,7 +260,7 @@ class EventsView: NSView {
         let menuBarHeight = NSApp.mainMenu!.menuBarHeight
 
         if cocoaCB.window.isInFullscreen && (menuBarHeight > 0) {
-            topMargin = cocoaCB.window.titleBarHeight + 1 + menuBarHeight
+            topMargin = TitleBar.height + 1 + menuBarHeight
         }
 
         guard var vF = window?.screen?.frame else { return false }
@@ -242,8 +272,8 @@ class EventsView: NSView {
 
         var clippedBounds = bounds.intersection(vFV)
         if !cocoaCB.window.isInFullscreen {
-            clippedBounds.origin.y += cocoaCB.window.titleBarHeight
-            clippedBounds.size.height -= cocoaCB.window.titleBarHeight
+            clippedBounds.origin.y += TitleBar.height
+            clippedBounds.size.height -= TitleBar.height
         }
         return clippedBounds.contains(pt)
     }

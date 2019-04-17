@@ -1,6 +1,7 @@
 from waftools import inflector
 from waftools.checks.generic import *
 from waflib import Utils
+from distutils.version import StrictVersion
 import os
 
 __all__ = ["check_pthreads", "check_iconv", "check_lua",
@@ -113,10 +114,13 @@ def check_cocoa(ctx, dependency_identifier):
     return res
 
 def check_swift(ctx, dependency_identifier):
+    minVer = StrictVersion("3.0.2")
     if ctx.env.SWIFT_VERSION:
-        major = int(ctx.env.SWIFT_VERSION.split('.')[0])
-        ctx.add_optional_message(dependency_identifier,
-                                 'version found: ' + ctx.env.SWIFT_VERSION)
-        if major >= 3:
+        if StrictVersion(ctx.env.SWIFT_VERSION) >= minVer:
+            ctx.add_optional_message(dependency_identifier,
+                                     'version found: ' + str(ctx.env.SWIFT_VERSION))
             return True
+    ctx.add_optional_message(dependency_identifier,
+                             "'swift >= " + str(minVer) + "' not found, found " +
+                             str(ctx.env.SWIFT_VERSION or None))
     return False
